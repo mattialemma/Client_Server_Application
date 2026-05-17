@@ -46,6 +46,7 @@ void ui_set_positions(ui_state_t *ui, const char *positions);
 void ui_set_game_over(ui_state_t *ui, const char *winner, const char *score, const char *scores);
 void ui_add_event(ui_state_t *ui, const char *fmt, ...);
 void ui_render(const ui_state_t *ui, const char *input);
+void ui_clear_screen(void);
 void ui_finish(void);
 
 #endif

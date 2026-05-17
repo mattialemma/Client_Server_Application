@@ -10,6 +10,11 @@
 #define ANSI_PLAYER "\033[1;32m"
 #define ANSI_WALL "\033[1;37m"
 
+#define CELL_CURRENT_PLAYER "☻"
+#define CELL_OWNED "▒"
+#define CELL_WALL "█"
+#define CELL_FREE "."
+
 static void safe_copy(char *dst, size_t dst_size, const char *src) {
     if (dst_size == 0) {
         return;
@@ -22,6 +27,11 @@ static void safe_copy(char *dst, size_t dst_size, const char *src) {
 
 static void print_rule(void) {
     puts("============================================================");
+}
+
+void ui_clear_screen(void) {
+    fputs("\033[2J\033[3J\033[H", stdout);
+    fflush(stdout);
 }
 
 static const char *owner_color(char c) {
@@ -37,20 +47,72 @@ static const char *owner_color(char c) {
     return palette[uc % (sizeof(palette) / sizeof(palette[0]))];
 }
 
-static void print_colored_cell(char c, int color_enabled) {
-    if (!color_enabled) {
+static char current_owner_symbol(const ui_state_t *ui) {
+    size_t nick_len;
+    const char *p;
+
+    if (ui->nickname[0] == '\0' || strcmp(ui->nickname, "-") == 0) {
+        return '@';
+    }
+
+    nick_len = strlen(ui->nickname);
+    p = ui->positions;
+    while (p != NULL && *p != '\0') {
+        if (strncmp(p, ui->nickname, nick_len) == 0 && p[nick_len] == ':' && p[nick_len + 1] != '\0') {
+            return p[nick_len + 1];
+        }
+        p = strchr(p, ',');
+        if (p != NULL) {
+            ++p;
+        }
+    }
+
+    return '@';
+}
+
+static int is_owner_symbol(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+static const char *cell_glyph(char c) {
+    if (c == '@') {
+        return CELL_CURRENT_PLAYER;
+    }
+    if (c == '#') {
+        return CELL_WALL;
+    }
+    if (c == '.') {
+        return CELL_FREE;
+    }
+    if (is_owner_symbol(c)) {
+        return CELL_OWNED;
+    }
+    return NULL;
+}
+
+static void print_colored_cell(char c, int color_enabled, char current_symbol) {
+    const char *glyph = cell_glyph(c);
+    const char *color;
+
+    if (glyph == NULL) {
         putchar(c);
         return;
     }
 
+    if (!color_enabled) {
+        printf("%s", glyph);
+        return;
+    }
+
     if (c == '@') {
-        printf("%s%c%s", ANSI_PLAYER, c, ANSI_RESET);
+        color = is_owner_symbol(current_symbol) ? owner_color(current_symbol) : ANSI_PLAYER;
+        printf("%s%s%s", color, glyph, ANSI_RESET);
     } else if (c == '#') {
-        printf("%s%c%s", ANSI_WALL, c, ANSI_RESET);
+        printf("%s%s%s", ANSI_WALL, glyph, ANSI_RESET);
     } else if (c == '.') {
-        printf("%s%c%s", ANSI_DIM, c, ANSI_RESET);
-    } else if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-        printf("%s%c%s", owner_color(c), c, ANSI_RESET);
+        printf("%s%s%s", ANSI_DIM, glyph, ANSI_RESET);
+    } else if (is_owner_symbol(c)) {
+        printf("%s%s%s", owner_color(c), glyph, ANSI_RESET);
     } else {
         putchar(c);
     }
@@ -58,19 +120,19 @@ static void print_colored_cell(char c, int color_enabled) {
 
 static void print_legend(int color_enabled) {
     printf("Legenda: ");
-    print_colored_cell('@', color_enabled);
+    print_colored_cell('@', color_enabled, 'A');
     printf(" tu  ");
-    print_colored_cell('#', color_enabled);
+    print_colored_cell('#', color_enabled, 'A');
     printf(" muro  ");
-    print_colored_cell('.', color_enabled);
+    print_colored_cell('.', color_enabled, 'A');
     printf(" libero  ");
-    print_colored_cell('A', color_enabled);
+    print_colored_cell('A', color_enabled, 'A');
     printf("/");
-    print_colored_cell('B', color_enabled);
+    print_colored_cell('B', color_enabled, 'A');
     printf("/... territori\n");
 }
 
-static void print_map_block(const char *title, int w, int h, const char *encoded, int color_enabled) {
+static void print_map_block(const char *title, int w, int h, const char *encoded, int color_enabled, char current_symbol) {
     int rows = 0;
     int col = 0;
     const char *p = encoded;
@@ -89,7 +151,7 @@ static void print_map_block(const char *title, int w, int h, const char *encoded
                 col = 0;
             }
         } else {
-            print_colored_cell(*p, color_enabled);
+            print_colored_cell(*p, color_enabled, current_symbol);
             col++;
             if (col == w) {
                 putchar('\n');
@@ -191,10 +253,9 @@ void ui_add_event(ui_state_t *ui, const char *fmt, ...) {
 
 void ui_render(const ui_state_t *ui, const char *input) {
     int tty = isatty(STDOUT_FILENO);
+    char current_symbol = current_owner_symbol(ui);
 
-    if (tty) {
-        fputs("\033[H\033[2J", stdout);
-    }
+    ui_clear_screen();
 
     print_rule();
     puts("CONQUISTA DEL TERRITORIO");
@@ -223,7 +284,7 @@ void ui_render(const ui_state_t *ui, const char *input) {
 
     print_rule();
     if (ui->local_valid) {
-        print_map_block("Mappa locale (@ sei tu, # muro scoperto)", ui->local_w, ui->local_h, ui->local_map, tty);
+        print_map_block("Mappa locale", ui->local_w, ui->local_h, ui->local_map, tty, current_symbol);
     } else {
         puts("Mappa locale");
         puts("  disponibile dopo il login");
@@ -231,7 +292,7 @@ void ui_render(const ui_state_t *ui, const char *input) {
 
     print_rule();
     if (ui->global_valid) {
-        print_map_block("Mappa globale proprieta", ui->global_w, ui->global_h, ui->global_map, tty);
+        print_map_block("Mappa globale proprieta", ui->global_w, ui->global_h, ui->global_map, tty, current_symbol);
         printf("Giocatori: %s\n", ui->positions);
     } else {
         puts("Mappa globale");

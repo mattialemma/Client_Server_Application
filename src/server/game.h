@@ -3,8 +3,8 @@
 
 #include "common/protocol.h"
 
-#define MAP_W 20
-#define MAP_H 10
+#define MAP_W 30
+#define MAP_H 15
 #define LOCAL_VIEW_W 11
 #define LOCAL_VIEW_H 11
 // Struttura per rappresentare un giocatore, contenente il nickname, lo stato di connessione, il simbolo sulla mappa, la posizione e la mappa delle celle scoperte

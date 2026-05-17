@@ -6,7 +6,7 @@
 
 // Funzione per convertire una stringa in un long, con validazione dei limiti e gestione degli errori di conversione. Restituisce il valore convertito e imposta *ok a 1 se la conversione è riuscita, altrimenti 0.
 long utils_parse_long(const char *s, long min_value, long max_value, int *ok) {
-    char *end = NULL;
+    char *end = NULL; //controllo su prima conversione
     long value;
 
     if (ok != NULL) {
@@ -24,10 +24,6 @@ long utils_parse_long(const char *s, long min_value, long max_value, int *ok) {
         *ok = 1;
     }
     return value;
-}
-
-time_t utils_now(void) {
-    return time(NULL);
 }
 
 char utils_owner_symbol(const char *nickname) {

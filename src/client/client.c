@@ -247,10 +247,18 @@ static int execute_command(int fd, client_ctx_t *ctx, char *line) {
 
 static int handle_input_byte(int fd, client_ctx_t *ctx, unsigned char ch) {
     char command[UI_INPUT_MAX];
+    direction_t dir;
 
     if (ch == 4) {
         send_command(fd, "C2S_QUIT");
         return 1;
+    }
+    if (ctx->input_len == 0 && (ch == 'w' || ch == 'a' || ch == 's' || ch == 'd')) {
+        command[0] = (char)ch;
+        command[1] = '\0';
+        if (proto_parse_direction(command, &dir) == 0) {
+            return send_command(fd, "C2S_MOVE %s", proto_direction_name(dir));
+        }
     }
     if (ch == '\r' || ch == '\n') {
         snprintf(command, sizeof(command), "%s", ctx->input);
@@ -261,12 +269,20 @@ static int handle_input_byte(int fd, client_ctx_t *ctx, unsigned char ch) {
     if (ch == 127 || ch == 8) {
         if (ctx->input_len > 0) {
             ctx->input[--ctx->input_len] = '\0';
+            if (ctx->interactive) {
+                fputs("\b \b", stdout);
+                fflush(stdout);
+            }
         }
         return 0;
     }
     if (isprint(ch) && ctx->input_len + 1 < sizeof(ctx->input)) {
         ctx->input[ctx->input_len++] = (char)ch;
         ctx->input[ctx->input_len] = '\0';
+        if (ctx->interactive) {
+            putchar(ch);
+            fflush(stdout);
+        }
     }
     return 0;
 }
@@ -358,7 +374,7 @@ int client_run(const char *host, const char *port) {
             } else if (rc > 0) {
                 running = 0;
             }
-            should_render = ctx.interactive || command_done;
+            should_render = command_done;
         }
 
         if (should_render) {

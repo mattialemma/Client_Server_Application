@@ -14,7 +14,6 @@ typedef struct {
     size_t capacity;
 } user_db_t;
 
-void users_init(user_db_t *db);
 void users_free(user_db_t *db);
 int users_register(user_db_t *db, const char *nickname, const char *password);
 int users_authenticate(const user_db_t *db, const char *nickname, const char *password);
