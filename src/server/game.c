@@ -181,30 +181,28 @@ static const int WALL_MAPS[MAP_COUNT][MAP_H][MAP_W] = {
     }
 };
 
+static void game_reveal_around(game_t *game, int player_id);
+
+// Verifica che una coordinata appartenga alla griglia di gioco.
 static int in_bounds(int x, int y) {
-    // Verifica se le coordinate (x, y) sono all'interno dei limiti della mappa. Restituisce 1 se sono valide, o 0 se sono fuori dai limiti.
     return x >= 0 && x < MAP_W && y >= 0 && y < MAP_H;
 }
 
+// Appende testo a un buffer senza superarne la dimensione.
 static void append_text(char *out, size_t out_size, const char *text) {
-    // Appende 'text' alla stringa 'out' senza superare 'out_size' caratteri totali (incluso il terminatore null). Se 'out' è già piena, non fa nulla.
     size_t used = strlen(out);
     if (used < out_size) {
         snprintf(out + used, out_size - used, "%s", text);
     }
 }
 
-static char symbol_for_slot(int slot) {
-    // Restituisce un simbolo unico per il giocatore in base al suo slot (ID). Utilizza lettere e numeri per rappresentare i giocatori, e restituisce '?' se lo slot è negativo.
-    static const char symbols[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    if (slot >= 0) {
-        return symbols[slot % (int)(sizeof(symbols) - 1)];
-    }
-    return '?';
+// Genera l'identificatore stabile dello slot giocatore, ad esempio P0.
+static void symbol_for_slot(size_t slot, char *out, size_t out_size) {
+    snprintf(out, out_size, "P%zu", slot);
 }
 
+// Espande l'array dinamico dei giocatori quando non basta piu.
 static int game_reserve_players(game_t *game, size_t needed) {
-    // Assicura che il gioco abbia spazio per almeno 'needed' giocatori, espandendo dinamicamente l'array dei giocatori se necessario. Restituisce 0 in caso di successo, o -1 in caso di errore (ad esempio, memoria insufficiente).
     player_t *new_players;
     size_t old_capacity = game->player_capacity;
     size_t new_capacity = old_capacity == 0 ? INITIAL_PLAYERS_CAPACITY : old_capacity;
@@ -225,8 +223,8 @@ static int game_reserve_players(game_t *game, size_t needed) {
     return 0;
 }
 
+// Sceglie casualmente una cella libera e non occupata da giocatori attivi.
 static int find_free_spawn(const game_t *game, int *x, int *y) {
-    // Cerca una cella libera (non occupata da un muro o da un giocatore) e restituisce le sue coordinate tramite i parametri x e y. Restituisce 0 se trovato, o -1 se non ci sono celle libere.
     int yy;
     int xx;
     size_t p;
@@ -283,8 +281,8 @@ static int find_free_spawn(const game_t *game, int *x, int *y) {
     return -1;
 }
 
+// Inizializza proprieta e muri scegliendo una delle mappe statiche disponibili.
 void game_init(game_t *game) {
-    // Inizializza la mappa dei muri, e imposta i proprietari delle celle a -1 (nessuno).
     int y;
     int x;
 
@@ -298,14 +296,14 @@ void game_init(game_t *game) {
     memcpy(game->wall, WALL_MAPS[rand() % MAP_COUNT], sizeof(game->wall));
 }
 
+// Libera le risorse dinamiche dello stato di gioco.
 void game_free(game_t *game) {
-    // Libera le risorse allocate per il gioco, come l'array dei giocatori, e resetta la struttura del gioco a uno stato vuoto.
     free(game->players);
     memset(game, 0, sizeof(*game));
 }
 
+// Inserisce o riattiva un giocatore e gli assegna una posizione iniziale.
 int game_add_player(game_t *game, const char *nickname) {
-    // Aggiunge un giocatore con il nickname specificato al gioco, restituendo il suo ID, o -1 in caso di errore (ad esempio, nickname già in uso o nessun posto libero).
     size_t i;
     size_t slot = 0;
     int found_slot = 0;
@@ -343,7 +341,7 @@ int game_add_player(game_t *game, const char *nickname) {
         memset(&game->players[slot], 0, sizeof(game->players[slot]));
         strncpy(game->players[slot].nickname, nickname, NICK_MAX);
         game->players[slot].nickname[NICK_MAX] = '\0';
-        game->players[slot].symbol = symbol_for_slot((int)slot);
+        symbol_for_slot(slot, game->players[slot].symbol, sizeof(game->players[slot].symbol));
         game->players[slot].used = 1;
     }
     game->players[slot].active = 1;
@@ -354,15 +352,15 @@ int game_add_player(game_t *game, const char *nickname) {
     return (int)slot;
 }
 
+// Segna il giocatore come offline senza cancellare lo storico dei territori.
 void game_remove_player(game_t *game, int player_id) {
-    // Rimuove il giocatore specificato dal gioco, segnandolo come non attivo. Non libera lo slot del giocatore, quindi se un nuovo giocatore si unisce con lo stesso nickname, potrebbe riutilizzare lo stesso slot.
     if (player_id >= 0 && (size_t)player_id < game->player_count) {
         game->players[player_id].active = 0;
     }
 }
 
+// Cerca un giocatore attualmente online dato il nickname.
 int game_find_player(const game_t *game, const char *nickname) {
-    // Cerca un giocatore attivo con il nickname specificato e restituisce il suo ID, o -1 se non trovato.
     size_t i;
     for (i = 0; i < game->player_count; ++i) {
         if (game->players[i].active && strcmp(game->players[i].nickname, nickname) == 0) {
@@ -372,8 +370,8 @@ int game_find_player(const game_t *game, const char *nickname) {
     return -1;
 }
 
-void game_reveal_around(game_t *game, int player_id) {
-    // Aggiorna la mappa dei muri scoperti per il giocatore specificato, rivelando i muri nelle celle adiacenti alla posizione del giocatore.
+// Aggiorna i muri scoperti nelle celle adiacenti al giocatore.
+static void game_reveal_around(game_t *game, int player_id) {
     int dx;
     int dy;
     int x;
@@ -395,8 +393,8 @@ void game_reveal_around(game_t *game, int player_id) {
     }
 }
 
+// Esegue un movimento se confini, muri e occupazione lo permettono.
 int game_move(game_t *game, int player_id, direction_t dir) {
-    // Tenta di muovere il giocatore specificato nella direzione indicata. Restituisce 0 se il movimento è riuscito, o un codice di errore negativo se il movimento non è possibile (ad esempio, fuori dai limiti, muro, o cella occupata da un altro giocatore).
     int nx;
     int ny;
     size_t i;
@@ -439,8 +437,17 @@ int game_move(game_t *game, int player_id, direction_t dir) {
     return 0;
 }
 
+// Aggiunge una cella alla codifica testuale della mappa separata da virgole.
+static void append_cell(char *out, size_t out_size, int *first_cell, const char *cell) {
+    if (!*first_cell) {
+        append_text(out, out_size, ",");
+    }
+    append_text(out, out_size, cell);
+    *first_cell = 0;
+}
+
+// Costruisce la finestra 11x11 visibile dal singolo giocatore.
 void game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size) {
-    // Costruisce una rappresentazione testuale della mappa locale attorno al giocatore specificato, con i muri rappresentati da '#', le celle vuote da '.', e il giocatore stesso da '@'. Le righe sono separate da '/' e la stringa risultante è terminata da null. Se il player_id non è valido o il giocatore non è attivo, restituisce una stringa vuota.
     int y;
     int x;
     int map_x;
@@ -448,7 +455,6 @@ void game_build_local_map(const game_t *game, int player_id, char *out, size_t o
     int start_x;
     int start_y;
     int owner;
-    char row[LOCAL_VIEW_W + 2];
     const player_t *p;
 
     out[0] = '\0';
@@ -460,53 +466,56 @@ void game_build_local_map(const game_t *game, int player_id, char *out, size_t o
     start_y = p->y - LOCAL_VIEW_H / 2;
 
     for (y = 0; y < LOCAL_VIEW_H; ++y) {
+        int first_cell = 1;
+        if (y > 0) {
+            append_text(out, out_size, "/");
+        }
         for (x = 0; x < LOCAL_VIEW_W; ++x) {
             map_x = start_x + x;
             map_y = start_y + y;
             if (!in_bounds(map_x, map_y)) {
-                row[x] = '~';
+                append_cell(out, out_size, &first_cell, "~");
             } else if (p->x == map_x && p->y == map_y) {
-                row[x] = '@';
+                append_cell(out, out_size, &first_cell, "@");
             } else if (p->discovered_walls[map_y][map_x]) {
-                row[x] = '#';
+                append_cell(out, out_size, &first_cell, "#");
             } else {
                 owner = game->owner[map_y][map_x];
-                row[x] = owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
-                    ? game->players[owner].symbol
-                    : '.';
+                append_cell(out, out_size, &first_cell,
+                            owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
+                                ? game->players[owner].symbol
+                                : ".");
             }
         }
-        row[LOCAL_VIEW_W] = (y == LOCAL_VIEW_H - 1) ? '\0' : '/';
-        row[LOCAL_VIEW_W + 1] = '\0';
-        append_text(out, out_size, row);
     }
 }
 
+// Costruisce la mappa pubblica delle proprieta, senza rivelare i muri.
 void game_build_global_map(const game_t *game, char *out, size_t out_size) {
-    //  Costruisce una rappresentazione testuale della mappa globale, con i muri rappresentati da '#', le celle vuote da '.', e i giocatori da simboli unici. Le righe sono separate da '/' e la stringa risultante è terminata da null.
     int y;
     int x;
     int owner;
-    char row[MAP_W + 2];
 
     out[0] = '\0';
     for (y = 0; y < MAP_H; ++y) {
+        int first_cell = 1;
+        if (y > 0) {
+            append_text(out, out_size, "/");
+        }
         for (x = 0; x < MAP_W; ++x) {
             owner = game->owner[y][x];
-            row[x] = owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
-                ? game->players[owner].symbol
-                : '.';
+            append_cell(out, out_size, &first_cell,
+                        owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
+                            ? game->players[owner].symbol
+                            : ".");
         }
-        row[MAP_W] = (y == MAP_H - 1) ? '\0' : '/';
-        row[MAP_W + 1] = '\0';
-        append_text(out, out_size, row);
     }
 }
 
+// Codifica nickname, identificatore e coordinate dei giocatori online.
 void game_build_positions(const game_t *game, char *out, size_t out_size) {
-    // Costruisce una stringa che elenca i giocatori attivi e le loro posizioni, nel formato "nickname:symbol:x:y", separati da virgole. Se non ci sono giocatori attivi, restituisce "-".
     size_t i;
-    char tmp[96];
+    char tmp[128];
 
     out[0] = '\0';
     for (i = 0; i < game->player_count; ++i) {
@@ -514,7 +523,7 @@ void game_build_positions(const game_t *game, char *out, size_t out_size) {
             if (out[0] != '\0') {
                 append_text(out, out_size, ",");
             }
-            snprintf(tmp, sizeof(tmp), "%s:%c:%d:%d",
+            snprintf(tmp, sizeof(tmp), "%s:%s:%d:%d",
                      game->players[i].nickname,
                      game->players[i].symbol,
                      game->players[i].x,
@@ -527,8 +536,8 @@ void game_build_positions(const game_t *game, char *out, size_t out_size) {
     }
 }
 
+// Calcola e codifica il punteggio di tutti gli slot giocatore usati.
 void game_build_scores(const game_t *game, char *out, size_t out_size) {
-    // Costruisce una stringa che elenca i giocatori attivi e i loro punteggi (il numero di celle possedute), nel formato "nickname:score", separati da virgole. Se non ci sono giocatori attivi, restituisce "-".
     int *scores;
     int y;
     int x;
@@ -565,8 +574,8 @@ void game_build_scores(const game_t *game, char *out, size_t out_size) {
     free(scores);
 }
 
+// Trova il giocatore con piu celle possedute e restituisce nickname/punteggio.
 int game_winner(const game_t *game, char *nickname, size_t nickname_size, int *score) {
-    // Determina il vincitore del gioco, ovvero il giocatore con il punteggio più alto (il numero di celle possedute). Restituisce 0 se c'è un vincitore, o -1 se non ci sono giocatori attivi. Se c'è un vincitore, il suo nickname e punteggio vengono restituiti tramite i parametri 'nickname' e 'score'.
     int *scores;
     int best = -1;
     int best_score = -1;

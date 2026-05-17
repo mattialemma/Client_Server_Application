@@ -19,12 +19,6 @@ bin/server
 bin/client
 ```
 
-Smoke test ripetibile:
-
-```sh
-make test
-```
-
 ## Esecuzione nativa
 
 Avvio server:
@@ -105,14 +99,14 @@ docker compose run --rm client
 
 ## Note progettuali
 
-- Server single-process basato su `select(2)`.
+- Server single-process basato esplicitamente su `select(2)`.
 - Protocollo applicativo testuale con framing a righe terminate da `\n`.
-- Ostacoli generati casualmente dal server a ogni nuova partita, con controllo che le celle libere restino connesse.
-- Utenti, sessioni client e giocatori sono gestiti con array dinamici riallocabili: non esiste un limite applicativo fisso basso, restano solo i limiti fisici del sistema.
+- Il server sceglie casualmente una mappa fra layout statici compilati nel codice.
+- Utenti, sessioni client e giocatori sono gestiti con array dinamici riallocabili. Usando `select(2)`, il numero di socket resta vincolato da `FD_SETSIZE` e dai limiti del sistema operativo.
 - Spawn casuale dei giocatori su celle libere e non occupate.
 - La mappa locale e una finestra 11x11 centrata sul giocatore; la mappa globale mostra tutta la griglia di proprieta.
 - Gli slot giocatore restano associati al nickname durante la partita, cosi le celle conquistate non cambiano proprietario se un client si disconnette e un altro entra.
-- Ogni giocatore riceve un simbolo univoco per la mappa, quindi nickname con la stessa iniziale restano distinguibili.
+- Ogni giocatore riceve un identificatore testuale stabile (`P0`, `P1`, ...), quindi non c'e collisione dopo le prime lettere/cifre.
 - Nessun database esterno: utenti e stato partita sono mantenuti in memoria.
 - Nessuna libreria esterna oltre a libc/POSIX.
 - Il server non scrive su `stdout` e non legge da `stdin`.

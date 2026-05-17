@@ -17,9 +17,9 @@
 
 #define INITIAL_CLIENTS_CAPACITY 16
 
+// Riporta una sessione client allo stato libero.
 static void client_reset(client_session_t *c)
 {
-    // Resetta lo stato di una sessione client, chiudendo il socket se è aperto e azzerando tutti i campi della struttura client_session_t. Questa funzione viene utilizzata sia quando si accettano nuove connessioni che quando si disconnettono i client esistenti, per assicurarsi che la struttura client_session_t sia sempre in uno stato consistente e pronta per essere riutilizzata.
     c->fd = -1;
     c->authenticated = 0;
     c->player_id = -1;
@@ -27,9 +27,9 @@ static void client_reset(client_session_t *c)
     c->inbuf_len = 0;
 }
 
+// Inizializza lo stato globale del server e la partita.
 static void server_init(server_t *s, int listen_fd, int duration_sec, int period_sec)
 {
-    // Inizializza lo stato del server, impostando i parametri di configurazione (porta di ascolto, durata della partita, periodo di aggiornamento) e inizializzando le strutture dati per la gestione dei client, degli utenti registrati e dello stato del gioco. Questa funzione viene chiamata all'avvio del server per preparare tutto il necessario prima di entrare nel ciclo principale di gestione delle connessioni e degli eventi.
     memset(s, 0, sizeof(*s));
     s->listen_fd = listen_fd;
     s->duration_sec = duration_sec;
@@ -40,9 +40,9 @@ static void server_init(server_t *s, int listen_fd, int duration_sec, int period
     game_init(&s->game);
 }
 
+// Libera array dinamici e sottostrutture possedute dal server.
 static void server_free(server_t *s)
 {
-    // Libera tutte le risorse allocate dal server, inclusi i client connessi, il database degli utenti e lo stato del gioco. Questa funzione viene chiamata alla terminazione del server per assicurarsi che tutte le risorse vengano correttamente liberate e che non ci siano perdite di memoria.
     free(s->clients);
     users_free(&s->users);
     game_free(&s->game);
@@ -51,9 +51,10 @@ static void server_free(server_t *s)
     s->client_capacity = 0;
 }
 
+// Garantisce spazio per almeno needed sessioni client.
 static int server_reserve_clients(server_t *s, size_t needed)
 {
-    // Funzione di utilità per assicurarsi che l'array dei client del server abbia una capacità sufficiente per memorizzare un certo numero di sessioni client. Se la capacità attuale è inferiore a quella necessaria, tenta di espandere l'array raddoppiando la sua dimensione fino a raggiungere o superare la capacità richiesta. Se l'espansione ha successo, inizializza i nuovi slot con client_reset; altrimenti, restituisce -1 in caso di errore di allocazione.
+    // Le sessioni crescono dinamicamente; il limite pratico resta quello di select/OS.
     client_session_t *new_clients;
     size_t i;
     size_t old_capacity = s->client_capacity;
@@ -83,9 +84,9 @@ static int server_reserve_clients(server_t *s, size_t needed)
 
 static void disconnect_client(server_t *s, int index);
 
+// Costruisce una risposta S2C e la invia come singola riga di protocollo.
 static int sendf(client_session_t *c, const char *fmt, ...)
 {
-    // Funzione di utilità per inviare una risposta formattata a un client specifico. Prende in input la sessione del client, una stringa di formato e un numero variabile di argomenti, costruisce la stringa da inviare utilizzando vsnprintf e proto_make_line per assicurarsi che sia correttamente terminata da un newline, e infine utilizza net_send_line per inviare la stringa al client. Se si verifica un errore durante la formattazione o l'invio, restituisce -1; altrimenti, restituisce il numero di byte inviati.
     char payload[PROTO_MAX_LINE];
     char line[PROTO_MAX_LINE];
     va_list ap;
@@ -105,10 +106,10 @@ static int sendf(client_session_t *c, const char *fmt, ...)
     return net_send_line(c->fd, line);
 }
 
+// Invia al client la mappa locale del suo giocatore.
 static int send_local(server_t *s, client_session_t *c)
 {
-    // Invia a un client specifico un aggiornamento locale della mappa, che include solo le celle visibili intorno alla posizione del giocatore. Se il client non è autenticato o se si verifica un errore durante la costruzione o l'invio della stringa, restituisce -1; altrimenti, restituisce il numero di byte inviati.
-    char map[512];
+    char map[PROTO_MAX_LINE];
     if (c->authenticated && c->player_id >= 0)
     {
         game_build_local_map(&s->game, c->player_id, map, sizeof(map));
@@ -117,11 +118,11 @@ static int send_local(server_t *s, client_session_t *c)
     return 0;
 }
 
+// Invia a un client la vista globale pubblica dello stato di gioco.
 static int send_global_to_client(server_t *s, client_session_t *c)
 {
-    // Invia a un client specifico un aggiornamento globale dello stato del gioco, che include la mappa globale e le posizioni di tutti i giocatori. Se il client non è autenticato o se si verifica un errore durante la costruzione o l'invio della stringa, restituisce -1; altrimenti, restituisce il numero di byte inviati.
-    char map[512];
-    char pos[512];
+    char map[PROTO_MAX_LINE];
+    char pos[PROTO_MAX_LINE];
     if (c->fd >= 0 && c->authenticated)
     {
         game_build_global_map(&s->game, map, sizeof(map));
@@ -131,9 +132,9 @@ static int send_global_to_client(server_t *s, client_session_t *c)
     return 0;
 }
 
+// Invia l'aggiornamento globale a tutti i client autenticati.
 static void broadcast_global(server_t *s)
 {
-    // Invia a tutti i client autenticati un aggiornamento globale dello stato del gioco, che include la mappa globale e le posizioni di tutti i giocatori. Se l'invio a un client fallisce, quel client viene disconnesso.
     size_t i;
     for (i = 0; i < s->client_count; ++i)
     {
@@ -144,9 +145,9 @@ static void broadcast_global(server_t *s)
     }
 }
 
+// Chiude una connessione e aggiorna lo stato del giocatore associato.
 static void disconnect_client(server_t *s, int index)
 {
-    // Disconnette un client specifico, chiudendo il socket e rimuovendo il giocatore associato al client dal gioco se è autenticato. Dopo aver disconnesso il client, resetta la sessione del client in modo che possa essere riutilizzata per future connessioni.
     client_session_t *c = &s->clients[index];
     if (c->fd >= 0)
     {
@@ -154,14 +155,15 @@ static void disconnect_client(server_t *s, int index)
     }
     if (c->authenticated && c->player_id >= 0)
     {
+        // Il giocatore diventa offline, ma i territori restano assegnati al suo slot.
         game_remove_player(&s->game, c->player_id);
     }
     client_reset(c);
 }
 
+// Accetta una nuova connessione e la inserisce in uno slot disponibile.
 static void accept_client(server_t *s)
 {
-    // Accetta una nuova connessione in arrivo sul socket di ascolto del server. Se l'accettazione ha successo, cerca uno slot libero nell'array dei client per memorizzare la nuova sessione; se non ci sono slot liberi, tenta di espandere l'array dei client. Se l'espansione fallisce o se il server è pieno, invia un messaggio di errore al client e chiude la connessione. Altrimenti, inizializza la sessione del nuovo client e invia un messaggio di benvenuto.
     int fd;
     size_t i;
     size_t slot;
@@ -171,9 +173,15 @@ static void accept_client(server_t *s)
     {
         return;
     }
+    // select(2) usa fd_set: descrittori oltre FD_SETSIZE non sono gestibili.
+    if (fd >= FD_SETSIZE)
+    {
+        net_send_line(fd, "S2C_ERR SERVER_FULL\n");
+        close(fd);
+        return;
+    }
     for (i = 0; i < s->client_count; ++i)
     {
-        // Cerco uno slot libero nell'array dei client per memorizzare la nuova sessione; se non ci sono slot liberi, tento di espandere l'array dei client. Se l'espansione fallisce o se il server è pieno, invio un messaggio di errore al client e chiudo la connessione. Altrimenti, inizializzo la sessione del nuovo client e invio un messaggio di benvenuto.
         if (s->clients[i].fd < 0)
         {
             client_reset(&s->clients[i]);
@@ -195,9 +203,9 @@ static void accept_client(server_t *s)
     sendf(&s->clients[slot], "S2C_OK CONNECTED");
 }
 
+// Controlla che il comando richiedente appartenga a un client autenticato.
 static int require_auth(client_session_t *c)
 {
-    // Verifica se una sessione client è autenticata. Se non lo è, invia un messaggio di errore al client e restituisce 0; altrimenti, restituisce 1.
     if (!c->authenticated)
     {
         sendf(c, "S2C_ERR NOT_AUTHENTICATED");
@@ -206,9 +214,9 @@ static int require_auth(client_session_t *c)
     return 1;
 }
 
+// Gestisce C2S_REGISTER.
 static void handle_register(server_t *s, client_session_t *c, char **tok, int ntok)
 {
-    // Gestisce la richiesta di registrazione di un nuovo utente. Prende in input il server, la sessione del client che ha inviato la richiesta, i token della riga di comando e il numero di token. Se la sintassi è errata, invia un messaggio di errore al client. Altrimenti, tenta di registrare l'utente nel database degli utenti del server utilizzando i token come nickname e password. In base al risultato della registrazione, invia al client un messaggio di successo o un messaggio di errore specifico (ad esempio, se l'utente esiste già o se i dati non sono validi).
     int rc;
     if (ntok != 3)
     {
@@ -234,9 +242,9 @@ static void handle_register(server_t *s, client_session_t *c, char **tok, int nt
     }
 }
 
+// Gestisce C2S_LOGIN e crea la presenza del giocatore nella partita.
 static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
 {
-    // Gestisce la richiesta di login di un utente esistente. Prende in input il server, la sessione del client che ha inviato la richiesta, i token della riga di comando e il numero di token. Se la sintassi è errata o se il client è già autenticato, invia un messaggio di errore al client. Altrimenti, tenta di autenticare l'utente utilizzando i token come nickname e password confrontandoli con il database degli utenti del server. Se l'autenticazione ha successo ma l'utente è già online, invia un messaggio di errore al client. Se l'autenticazione ha successo e l'utente non è online, aggiunge il giocatore al gioco, aggiorna lo stato della sessione del client per riflettere l'autenticazione e invia un messaggio di successo con le coordinate iniziali del giocatore.
     int player_id;
     if (ntok != 3)
     {
@@ -268,14 +276,18 @@ static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
     c->player_id = player_id;
     strncpy(c->nickname, tok[1], NICK_MAX);
     c->nickname[NICK_MAX] = '\0';
-    sendf(c, "S2C_OK LOGGED_IN %d %d", s->game.players[player_id].x, s->game.players[player_id].y);
+    sendf(c, "S2C_OK LOGGED_IN %s %s %d %d",
+          c->nickname,
+          s->game.players[player_id].symbol,
+          s->game.players[player_id].x,
+          s->game.players[player_id].y);
     send_local(s, c);
     broadcast_global(s);
 }
 
+// Gestisce C2S_MOVE e comunica l'esito del movimento.
 static void handle_move(server_t *s, client_session_t *c, char **tok, int ntok)
 {
-    // Gestisce la richiesta di movimento di un giocatore. Prende in input il server, la sessione del client che ha inviato la richiesta, i token della riga di comando e il numero di token. Se la sintassi è errata o se il client non è autenticato, invia un messaggio di errore al client. Altrimenti, tenta di muovere il giocatore nella direzione specificata dai token. In base al risultato del tentativo di movimento, invia al client un messaggio di successo con le nuove coordinate del giocatore o un messaggio di errore specifico (ad esempio, se il movimento è fuori dai limiti, se c'è un muro o se la cella è occupata da un altro giocatore). Se il movimento ha successo, invia anche un aggiornamento locale al client e un aggiornamento globale a tutti i client.
     direction_t dir;
     int rc;
     if (!require_auth(c))
@@ -311,10 +323,10 @@ static void handle_move(server_t *s, client_session_t *c, char **tok, int ntok)
     send_local(s, c);
 }
 
+// Gestisce C2S_LIST_USERS.
 static void handle_users(server_t *s, client_session_t *c)
 {
-    // Gestisce la richiesta di elenco degli utenti attualmente online. Prende in input il server e la sessione del client che ha inviato la richiesta. Se il client non è autenticato, invia un messaggio di errore al client. Altrimenti, costruisce una stringa con i nickname e le posizioni di tutti i giocatori attualmente nel gioco e invia questa stringa al client in un messaggio di successo.
-    char pos[512];
+    char pos[PROTO_MAX_LINE];
     if (!require_auth(c))
     {
         return;
@@ -323,9 +335,9 @@ static void handle_users(server_t *s, client_session_t *c)
     sendf(c, "S2C_USERS %s", pos);
 }
 
+// Smista una riga C2S verso il gestore del comando corrispondente.
 static void handle_line(server_t *s, int index, char *line)
 {
-    //  Gestisce una singola linea di comando ricevuta da un client specifico, identificato dall'indice nell'array dei client del server. La funzione analizza la linea di comando, suddivide i token e determina quale comando è stato inviato. In base al comando, chiama la funzione di gestione appropriata (ad esempio, handle_register, handle_login, handle_move, ecc.) per eseguire l'azione richiesta. Se il comando è sconosciuto o se la sintassi è errata, invia un messaggio di errore al client.
     client_session_t *c = &s->clients[index];
     char *tok[PROTO_MAX_TOKENS];
     int ntok = proto_split(line, tok, PROTO_MAX_TOKENS);
@@ -382,9 +394,9 @@ static void handle_line(server_t *s, int index, char *line)
     }
 }
 
+// Legge dal socket client e processa tutte le righe complete ricevute.
 static int read_client(server_t *s, int index)
 {
-    // Legge i dati in arrivo da un client specifico, identificato dall'indice nell'array dei client del server. Se la lettura ha successo, aggiorna il buffer di input del client e chiama handle_line per ogni linea completa ricevuta. Se si verifica un errore durante la lettura (ad esempio, il client si disconnette o invia dati non validi), chiama disconnect_client per chiudere la connessione e pulire lo stato del client. Restituisce 0 in caso di successo o -1 in caso di errore.
     client_session_t *c = &s->clients[index];
     char tmp[512];
     ssize_t n;
@@ -434,12 +446,12 @@ static int read_client(server_t *s, int index)
     return 0;
 }
 
+// Invia a tutti i client il risultato finale della partita.
 static void broadcast_game_over(server_t *s)
 {
-    // Informa tutti i client che la partita è terminata, inviando un messaggio che include il nickname del vincitore, il punteggio finale e le posizioni finali di tutti i giocatori. Dopo aver inviato questo messaggio, il server chiuderà tutte le connessioni dei client e terminerà l'esecuzione.
     size_t i;
     char winner[NICK_MAX + 1];
-    char scores[512];
+    char scores[PROTO_MAX_LINE];
     int score;
 
     game_winner(&s->game, winner, sizeof(winner), &score);
@@ -453,9 +465,9 @@ static void broadcast_game_over(server_t *s)
     }
 }
 
+// Calcola il timeout da passare a select per il prossimo evento temporizzato.
 static long seconds_until_next_event(server_t *s)
 {
-    // Calcola il numero di secondi fino al prossimo evento significativo per il server, che può essere l'invio del prossimo aggiornamento periodico o la fine della partita. Restituisce 0 se è già ora di eseguire l'evento, un numero positivo se c'è ancora tempo, o un numero negativo se si è superato il tempo previsto (anche se in questo caso il server dovrebbe già aver gestito l'evento).
     time_t now = time(NULL);
     time_t end = s->start_time + s->duration_sec;
     time_t next = s->next_update < end ? s->next_update : end;
@@ -466,17 +478,22 @@ static long seconds_until_next_event(server_t *s)
     return (long)(next - now);
 }
 
-// Funzione principale per eseguire il server, che prende in input la porta su cui ascoltare, la durata della partita in secondi (opzionale default 5 min) e il periodo di invio aggiornamenti ai client in secondi (opzionale, default 5 secondi)
+// Avvia il server: socket di ascolto, ciclo select, timer e cleanup finale.
 int server_run(const char *port, int duration_sec, int period_sec)
 {
     server_t s;
-    int listen_fd = net_create_server_socket(port); // Creo un socket server TCP che ascolta sulla porta specificata. Se si verifica un errore durante la creazione del socket, restituisco -1
+    int listen_fd = net_create_server_socket(port);
 
     if (listen_fd < 0)
     {
         return -1;
     }
-    signal(SIGPIPE, SIG_IGN); // Ignoro il segnale SIGPIPE che potrebbe essere generato quando si tenta di scrivere su un socket chiuso da parte del client
+    if (listen_fd >= FD_SETSIZE)
+    {
+        close(listen_fd);
+        return -1;
+    }
+    signal(SIGPIPE, SIG_IGN);
     server_init(&s, listen_fd, duration_sec, period_sec);
 
     while (s.running)
@@ -504,7 +521,8 @@ int server_run(const char *port, int duration_sec, int period_sec)
 
         tv.tv_sec = seconds_until_next_event(&s);
         tv.tv_usec = 0;
-        rc = select(maxfd + 1, &rfds, NULL, NULL, &tv); // Utilizzo la funzione select per attendere fino a quando c'è attività su uno dei socket (nuove connessioni o dati in arrivo dai client) o fino a quando scade il timeout per l'invio degli aggiornamenti periodici. Se select restituisce un valore negativo, verifico se è stato interrotto da un segnale (EINTR) e, in tal caso, continuo ad attendere; altrimenti, esco dal ciclo principale del server.
+        // select multiplexa socket di ascolto, socket client e timer periodici.
+        rc = select(maxfd + 1, &rfds, NULL, NULL, &tv);
         if (rc < 0)
         {
             if (errno == EINTR)

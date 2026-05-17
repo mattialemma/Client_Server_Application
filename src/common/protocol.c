@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+// Valida nickname/password: non vuoti, lunghezza massima e caratteri ammessi.
 int proto_valid_name(const char *s, size_t max_len) {
-    // Verifica se una stringa è un nome valido secondo le regole del protocollo. Un nome valido deve essere non vuoto, non superare la lunghezza massima specificata e contenere solo caratteri alfanumerici, underscore o trattini. Restituisce 1 se il nome è valido, altrimenti 0.
     size_t i;
 
     if (s == NULL || s[0] == '\0') {
@@ -23,8 +23,9 @@ int proto_valid_name(const char *s, size_t max_len) {
     return 1;
 }
 
+// Converte testo o tasto rapido in una direzione del gioco.
 int proto_parse_direction(const char *s, direction_t *dir) {
-    // Converte una stringa in una direzione. Accetta "UP", "DOWN", "LEFT", "RIGHT" (case-insensitive) o le loro abbreviazioni "w", "s", "a", "d". Se la conversione ha successo, memorizza la direzione risultante in 'dir' e restituisce 0; altrimenti, restituisce -1.
+    // Accetta le forme usate dal protocollo e i tasti rapidi del client.
     if (s == NULL || dir == NULL) {
         return -1;
     }
@@ -47,8 +48,8 @@ int proto_parse_direction(const char *s, direction_t *dir) {
     return -1;
 }
 
+// Restituisce il nome canonico usato nel protocollo per una direzione.
 const char *proto_direction_name(direction_t dir) {
-    // Restituisce una stringa rappresentante la direzione specificata. Se la direzione è valida, restituisce "UP", "DOWN", "LEFT" o "RIGHT"; altrimenti, restituisce "UNKNOWN".
     switch (dir) {
         case DIR_UP: return "UP";
         case DIR_DOWN: return "DOWN";
@@ -58,8 +59,8 @@ const char *proto_direction_name(direction_t dir) {
     }
 }
 
+// Divide una riga in token separati da spazi, modificando il buffer originale.
 int proto_split(char *line, char **tokens, int max_tokens) {
-    // Suddivide una linea di testo in token, utilizzando spazi, tabulazioni e ritorni a capo come delimitatori. Modifica la stringa originale inserendo terminatori null ('\0') dopo ogni token e memorizza i puntatori ai token nell'array 'tokens'. Restituisce il numero di token trovati, che sarà al massimo 'max_tokens'. Se la linea contiene più di 'max_tokens' token, i token in eccesso verranno ignorati.
     int count = 0;
     char *p = line;
 
@@ -81,8 +82,8 @@ int proto_split(char *line, char **tokens, int max_tokens) {
     return count;
 }
 
+// Costruisce una riga di protocollo e aggiunge sempre il newline finale.
 int proto_make_line(char *dst, size_t dst_size, const char *fmt, ...) {
-    // Funzione di utilità per costruire una linea di protocollo formattata. Prende in input un buffer di destinazione, la sua dimensione, una stringa di formato e un numero variabile di argomenti, utilizza vsnprintf per formattare la stringa e assicura che sia terminata da un newline. Se la formattazione ha successo e la stringa risultante si adatta nel buffer, restituisce il numero di byte scritti (escluso il terminatore null); altrimenti, restituisce -1.
     va_list ap;
     int n;
 

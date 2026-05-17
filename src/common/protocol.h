@@ -3,10 +3,10 @@
 
 #include <stddef.h>
 
-#define PROTO_MAX_LINE 4096 // Lunghezza massima di una linea del protocollo, inclusa la terminazione con '\n' e il carattere di fine stringa '\0'
-#define PROTO_MAX_TOKENS 32 // Numero massimo di token che una linea del protocollo può contenere, incluso il comando e i suoi argomenti. Se una linea contiene più di questo numero di token, i token in eccesso verranno ignorati.
-#define NICK_MAX 31 // Lunghezza massima di nickname e password, escluso il carattere di fine stringa '\0'
-#define PASS_MAX 31 // Lunghezza massima di nickname e password, escluso il carattere di fine stringa '\0'
+#define PROTO_MAX_LINE 16384
+#define PROTO_MAX_TOKENS 32
+#define NICK_MAX 31
+#define PASS_MAX 31
 
 typedef enum {
     DIR_UP = 0,

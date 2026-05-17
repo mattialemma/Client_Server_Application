@@ -17,8 +17,7 @@
 #include <unistd.h>
 
 typedef struct {
-    ui_state_t ui;
-    char pending_login[NICK_MAX + 1];
+    ui_state_t ui; 
     char input[UI_INPUT_MAX];
     size_t input_len;
     int interactive;
@@ -28,6 +27,7 @@ static struct termios saved_termios;
 static int termios_saved = 0;
 
 static void restore_terminal(void) {
+    // Ripristina il terminale se il client lo aveva messo in modalita non canonica.
     if (termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
         termios_saved = 0;
@@ -37,6 +37,7 @@ static void restore_terminal(void) {
 static void enable_terminal_mode(void) {
     struct termios raw;
 
+    // In modalita interattiva leggiamo un byte alla volta, cosi w/a/s/d sono immediati.
     if (!isatty(STDIN_FILENO)) {
         return;
     }
@@ -53,6 +54,7 @@ static void enable_terminal_mode(void) {
 }
 
 static int send_command(int fd, const char *fmt, ...) {
+    // Tutti i comandi applicativi sono righe terminate da '\n'.
     char payload[PROTO_MAX_LINE];
     char line[PROTO_MAX_LINE];
     va_list ap;
@@ -87,6 +89,7 @@ static int parse_two_numbers(char **tok, long *a, long *b) {
 }
 
 static void handle_server_line(client_ctx_t *ctx, const char *line) {
+    // Traduce una riga del protocollo nello stato grafico mantenuto dalla UI.
     char copy[PROTO_MAX_LINE];
     char *tok[PROTO_MAX_TOKENS];
     int ntok;
@@ -123,12 +126,12 @@ static void handle_server_line(client_ctx_t *ctx, const char *line) {
             ui_add_event(&ctx->ui, "Connessione stabilita");
         } else if (strcmp(tok[1], "REGISTERED") == 0) {
             ui_add_event(&ctx->ui, "Registrazione completata");
-        } else if (strcmp(tok[1], "LOGGED_IN") == 0 && ntok == 4) {
+        } else if (strcmp(tok[1], "LOGGED_IN") == 0 && ntok == 6) {
             int ok_x;
             int ok_y;
-            x = utils_parse_long(tok[2], 0, 10000, &ok_x);
-            y = utils_parse_long(tok[3], 0, 10000, &ok_y);
-            ui_set_user(&ctx->ui, ctx->pending_login[0] != '\0' ? ctx->pending_login : "?");
+            x = utils_parse_long(tok[4], 0, 10000, &ok_x);
+            y = utils_parse_long(tok[5], 0, 10000, &ok_y);
+            ui_set_user(&ctx->ui, tok[2], tok[3]);
             if (ok_x && ok_y) {
                 ui_set_position(&ctx->ui, (int)x, (int)y);
             }
@@ -155,6 +158,7 @@ static void handle_server_line(client_ctx_t *ctx, const char *line) {
 }
 
 static int process_socket(int fd, client_ctx_t *ctx, char *buf, size_t *len) {
+    // TCP e uno stream: accumuliamo byte finche non troviamo righe complete.
     char tmp[512];
     ssize_t n = recv(fd, tmp, sizeof(tmp), 0);
 
@@ -190,6 +194,7 @@ static int process_socket(int fd, client_ctx_t *ctx, char *buf, size_t *len) {
 }
 
 static int execute_command(int fd, client_ctx_t *ctx, char *line) {
+    // Converte i comandi del client nei messaggi C2S del protocollo.
     char copy[PROTO_MAX_LINE];
     char *tok[PROTO_MAX_TOKENS];
     int ntok;
@@ -207,7 +212,6 @@ static int execute_command(int fd, client_ctx_t *ctx, char *line) {
         return send_command(fd, "C2S_REGISTER %s %s", tok[1], tok[2]);
     }
     if (strcmp(tok[0], "login") == 0 && ntok == 3) {
-        snprintf(ctx->pending_login, sizeof(ctx->pending_login), "%s", tok[1]);
         ui_add_event(&ctx->ui, "Invio login per %s", tok[1]);
         return send_command(fd, "C2S_LOGIN %s %s", tok[1], tok[2]);
     }
@@ -249,6 +253,7 @@ static int handle_input_byte(int fd, client_ctx_t *ctx, unsigned char ch) {
     char command[UI_INPUT_MAX];
     direction_t dir;
 
+    // Ctrl+D e EOF vengono trattati come uscita pulita.
     if (ch == 4) {
         send_command(fd, "C2S_QUIT");
         return 1;
@@ -288,6 +293,7 @@ static int handle_input_byte(int fd, client_ctx_t *ctx, unsigned char ch) {
 }
 
 static int process_stdin(int fd, client_ctx_t *ctx, int *command_done) {
+    // Gestisce sia terminale interattivo sia input da pipe/file.
     unsigned char tmp[128];
     ssize_t n;
     ssize_t i;
@@ -305,7 +311,6 @@ static int process_stdin(int fd, client_ctx_t *ctx, int *command_done) {
         }
         return -1;
     }
-
     for (i = 0; i < n; ++i) {
         rc = handle_input_byte(fd, ctx, tmp[i]);
         if (tmp[i] == '\r' || tmp[i] == '\n') {
@@ -349,6 +354,7 @@ int client_run(const char *host, const char *port) {
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
         FD_SET(STDIN_FILENO, &rfds);
+        // select permette di ricevere update dal server mentre l'utente digita.
         rc = select(maxfd + 1, &rfds, NULL, NULL, NULL);
         if (rc < 0) {
             if (errno == EINTR) {
@@ -357,14 +363,12 @@ int client_run(const char *host, const char *port) {
             exit_status = -1;
             break;
         }
-
         if (FD_ISSET(fd, &rfds)) {
             if (process_socket(fd, &ctx, sock_buf, &sock_len) != 0) {
                 running = 0;
             }
             should_render = 1;
         }
-
         if (running && FD_ISSET(STDIN_FILENO, &rfds)) {
             int command_done = 0;
             rc = process_stdin(fd, &ctx, &command_done);

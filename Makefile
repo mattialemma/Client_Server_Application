@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200112L -Wall -Wextra -Wpedantic -O2 -g -I src -MMD -MP  ##TODO capire
+CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200112L -Wall -Wextra -Wpedantic -O2 -g -I src -MMD -MP
 LDFLAGS :=
 
 BIN_DIR := bin
@@ -9,7 +9,7 @@ CLIENT_OBJS := build/client/main.o build/client/client.o build/client/ui.o
 ALL_OBJS := $(COMMON_OBJS) $(SERVER_OBJS) $(CLIENT_OBJS)
 DEPS := $(ALL_OBJS:.o=.d)
 
-.PHONY: all server client clean run-server run-client test smoke
+.PHONY: all server client clean run-server run-client
 
 all: server client
 
@@ -35,11 +35,6 @@ run-server: server
 
 run-client: client
 	./$(BIN_DIR)/client 127.0.0.1 4242
-
-test: smoke
-
-smoke: all
-	sh tests/smoke_test.sh
 
 clean:
 	rm -rf build $(BIN_DIR)

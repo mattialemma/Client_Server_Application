@@ -70,13 +70,13 @@ Assunzioni conservative:
 
 - gli utenti sono mantenuti in memoria per la durata del processo;
 - password in chiaro, scelta didattica per evitare dipendenze crittografiche non richieste;
-- mappa 20x10 generata dal server, con ostacoli casuali e celle libere connesse;
+- mappa 30x15 scelta casualmente fra layout statici compilati nel server;
 - utenti, sessioni client e giocatori sono allocati dinamicamente, senza un limite applicativo prefissato;
 - la mappa locale inviata al client e una finestra 11x11 centrata sul giocatore;
 - spawn casuale su una cella libera e non occupata;
 - gli slot giocatore restano associati al nickname, evitando che celle gia conquistate cambino proprietario quando uno slot viene riutilizzato;
-- ogni giocatore riceve un simbolo univoco per distinguere nickname con la stessa iniziale;
-- massimo 16 client/giocatori e 64 utenti registrati;
+- ogni giocatore riceve un identificatore stabile (`P0`, `P1`, ...) usato nelle mappe;
+- utenti, sessioni e giocatori crescono con array dinamici; usando `select(2)`, i socket sono comunque vincolati da `FD_SETSIZE` e dai limiti del sistema operativo;
 - la visibilita dei muri e personale;
 - la mappa globale non rivela muri, ma solo proprieta;
 - in caso di tentativo di movimento contro un muro, il giocatore resta fermo e il muro viene marcato come scoperto.
@@ -120,6 +120,8 @@ S2C_USERS <posizioni>
 S2C_GAME_OVER <winner> <score> <punteggi>
 ```
 
+In caso di login riuscito, il dettaglio `S2C_OK LOGGED_IN <nickname> <player_id> <x> <y>` comunica al client il nickname autenticato, l'identificatore assegnato al giocatore e la posizione iniziale.
+
 ## 5. Dettagli implementativi rilevanti
 
 Il server mantiene:
@@ -132,7 +134,7 @@ Il server mantiene:
 - matrice personale dei muri scoperti per ciascun giocatore;
 - timer per timeout partita e aggiornamenti periodici.
 
-La funzione `game_init` genera ostacoli casuali e accetta solo mappe giocabili, cioe con un numero sufficiente di celle libere e una componente libera connessa. La funzione `game_move` valida i confini, controlla i muri, aggiorna posizione e proprieta e richiama la rivelazione locale degli ostacoli adiacenti. La mappa locale inviata dopo login, movimento o richiesta esplicita e una finestra 11x11 centrata sul giocatore, contenente solo i muri scoperti da quel giocatore e le proprieta pubbliche nelle celle della finestra.
+La funzione `game_init` sceglie casualmente uno dei layout statici disponibili. La funzione `game_move` valida i confini, controlla i muri, aggiorna posizione e proprieta e richiama la rivelazione locale degli ostacoli adiacenti. La mappa locale inviata dopo login, movimento o richiesta esplicita e una finestra 11x11 centrata sul giocatore, contenente solo i muri scoperti da quel giocatore e le proprieta pubbliche nelle celle della finestra.
 
 La funzione `server_run` costruisce il set di descrittori per `select`, accetta nuove connessioni, legge messaggi completi dai client e verifica periodicamente i timer.
 
@@ -164,11 +166,9 @@ docker compose run --rm client
 
 Il servizio `client` si collega al server usando il nome DNS Docker `server`.
 
-## 7. Test
+## 7. Verifica manuale
 
-Il piano di test manuale si trova in `tests/manual_test_plan.md`. Copre compilazione, login, registrazione, movimento, ostacoli, aggiornamenti globali, lista utenti, timeout partita e Docker.
-
-Il target `make test` esegue inoltre uno smoke test automatico minimale con server e client locali.
+La verifica prevista e manuale: compilazione, avvio server, connessione di uno o piu client, registrazione, login, movimento, ostacoli, aggiornamenti globali, lista utenti, timeout partita e Docker.
 
 ## 8. Limiti e possibili estensioni
 
@@ -187,4 +187,4 @@ Estensioni:
 - mappa configurabile;
 - gestione di pareggi esplicita;
 - protocollo binario a lunghezza prefissata;
-- test automatici con client scripted.
+- script di dimostrazione per avviare piu client con comandi predefiniti.

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Punto di ingresso del client: richiede host/porta e avvia client_run().
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "Uso: %s <host> <porta>\n", argv[0]);

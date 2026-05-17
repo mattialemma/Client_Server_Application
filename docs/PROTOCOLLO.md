@@ -12,10 +12,10 @@ TIPO argomento1 argomento2 ...
 
 I token non contengono spazi. Nickname e password accettano lettere, cifre, `_` e `-`, con lunghezza massima 31 caratteri.
 
-Le mappe sono codificate come righe concatenate da `/`. Esempio 3x2:
+Le mappe sono codificate come celle separate da `,` e righe separate da `/`. Esempio 3x2:
 
 ```txt
-ABC/..A
+P0,.,#/.,P1,.
 ```
 
 ## Client verso server
@@ -46,7 +46,7 @@ Dettagli `S2C_OK` usati dal server:
 ```txt
 S2C_OK CONNECTED
 S2C_OK REGISTERED
-S2C_OK LOGGED_IN <x> <y>
+S2C_OK LOGGED_IN <nickname> <player_id> <x> <y>
 S2C_OK MOVED <x> <y>
 S2C_OK BYE
 ```
@@ -80,7 +80,7 @@ Mappa locale:
 - `@`: posizione del giocatore.
 - `#`: muro scoperto dal giocatore.
 - `.`: cella libera senza proprietario noto.
-- `A-Z`/cifra: proprietario della cella. Il server assegna un simbolo univoco a ogni giocatore durante la partita, evitando ambiguita tra nickname con la stessa iniziale.
+- `P<n>`: proprietario della cella. Il server assegna un identificatore stabile a ogni slot giocatore.
 - rappresenta una finestra centrata sul giocatore, attualmente 11x11.
 - le celle fuori dai confini della griglia sono codificate come `~`, per evitare spazi nel payload.
 
@@ -92,7 +92,7 @@ Mappa globale:
 Posizioni:
 
 ```txt
-nickname:simbolo:x:y,nickname:simbolo:x:y
+nickname:player_id:x:y,nickname:player_id:x:y
 ```
 
 Punteggi:
