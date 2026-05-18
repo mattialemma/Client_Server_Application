@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200112L -Wall -Wextra -Wpedantic -O2 -g -I src -MMD -MP
+CFLAGS := -std=c11 -D_POSIX_C_SOURCE=200112L -Wall -Wextra -Wpedantic -O2 -g -I src
 LDFLAGS :=
 
 BIN_DIR := bin
@@ -7,7 +7,6 @@ COMMON_OBJS := build/common/net.o build/common/protocol.o build/common/utils.o
 SERVER_OBJS := build/server/main.o build/server/server.o build/server/game.o build/server/users.o
 CLIENT_OBJS := build/client/main.o build/client/client.o build/client/ui.o
 ALL_OBJS := $(COMMON_OBJS) $(SERVER_OBJS) $(CLIENT_OBJS)
-DEPS := $(ALL_OBJS:.o=.d)
 
 .PHONY: all server client clean run-server run-client
 
@@ -38,5 +37,3 @@ run-client: client
 
 clean:
 	rm -rf build $(BIN_DIR)
-
--include $(DEPS)
