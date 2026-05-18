@@ -2,3 +2,21 @@
 [2026-05-18 11:38:29] ERROR avvio server fallito sulla porta 4242: bind sulla porta 4242 fallita: Operation not permitted
 [2026-05-18 11:38:29] ERROR terminazione server con errore: bind sulla porta 4242 fallita: Operation not permitted
 [2026-05-18 11:38:29] INFO chiusura logging
+[2026-05-18 11:46:46] INFO logging inizializzato su server.log
+[2026-05-18 11:46:46] INFO server avviato porta=4242 durata=300 periodo=5
+[2026-05-18 11:46:51] INFO broadcast globale ai client autenticati
+[2026-05-18 11:46:56] INFO broadcast globale ai client autenticati
+[2026-05-18 11:47:01] INFO broadcast globale ai client autenticati
+[2026-05-18 11:47:41] INFO logging inizializzato su server.log
+[2026-05-18 11:47:41] INFO server avviato porta=4242 durata=300 periodo=5
+[2026-05-18 11:47:46] INFO broadcast globale ai client autenticati
+[2026-05-18 11:47:51] INFO broadcast globale ai client autenticati
+[2026-05-18 11:47:56] INFO broadcast globale ai client autenticati
+[2026-05-18 11:48:01] INFO broadcast globale ai client autenticati
+[2026-05-18 11:48:06] INFO logging inizializzato su server.log
+[2026-05-18 11:48:06] INFO server avviato porta=4242 durata=300 periodo=5
+[2026-05-18 11:48:11] INFO broadcast globale ai client autenticati
+[2026-05-18 11:48:14] INFO logging inizializzato su server.log
+[2026-05-18 11:48:14] ERROR avvio server fallito sulla porta 4242: bind sulla porta 4242 fallita: Operation not permitted
+[2026-05-18 11:48:14] ERROR terminazione server con errore: bind sulla porta 4242 fallita: Operation not permitted
+[2026-05-18 11:48:14] INFO chiusura logging
