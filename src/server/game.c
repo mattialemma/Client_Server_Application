@@ -189,11 +189,22 @@ static int in_bounds(int x, int y) {
 }
 
 // Appende testo a un buffer senza superarne la dimensione.
-static void append_text(char *out, size_t out_size, const char *text) {
-    size_t used = strlen(out);
-    if (used < out_size) {
-        snprintf(out + used, out_size - used, "%s", text);
+static int append_text(char *out, size_t out_size, const char *text) {
+    size_t used;
+    int written;
+
+    if (out_size == 0) {
+        return -1;
     }
+    used = strlen(out);
+    if (used >= out_size) {
+        return -1;
+    }
+    written = snprintf(out + used, out_size - used, "%s", text);
+    if (written < 0 || (size_t)written >= out_size - used) {
+        return -1;
+    }
+    return 0;
 }
 
 // Genera l'identificatore stabile dello slot giocatore, ad esempio P0.
@@ -438,16 +449,21 @@ int game_move(game_t *game, int player_id, direction_t dir) {
 }
 
 // Aggiunge una cella alla codifica testuale della mappa separata da virgole.
-static void append_cell(char *out, size_t out_size, int *first_cell, const char *cell) {
+static int append_cell(char *out, size_t out_size, int *first_cell, const char *cell) {
     if (!*first_cell) {
-        append_text(out, out_size, ",");
+        if (append_text(out, out_size, ",") != 0) {
+            return -1;
+        }
     }
-    append_text(out, out_size, cell);
+    if (append_text(out, out_size, cell) != 0) {
+        return -1;
+    }
     *first_cell = 0;
+    return 0;
 }
 
 // Costruisce la finestra 11x11 visibile dal singolo giocatore.
-void game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size) {
+int game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size) {
     int y;
     int x;
     int map_x;
@@ -457,9 +473,12 @@ void game_build_local_map(const game_t *game, int player_id, char *out, size_t o
     int owner;
     const player_t *p;
 
+    if (out_size == 0) {
+        return -1;
+    }
     out[0] = '\0';
     if (player_id < 0 || (size_t)player_id >= game->player_count || !game->players[player_id].active) {
-        return;
+        return -1;
     }
     p = &game->players[player_id];
     start_x = p->x - LOCAL_VIEW_W / 2;
@@ -468,86 +487,118 @@ void game_build_local_map(const game_t *game, int player_id, char *out, size_t o
     for (y = 0; y < LOCAL_VIEW_H; ++y) {
         int first_cell = 1;
         if (y > 0) {
-            append_text(out, out_size, "/");
+            if (append_text(out, out_size, "/") != 0) {
+                return -1;
+            }
         }
         for (x = 0; x < LOCAL_VIEW_W; ++x) {
             map_x = start_x + x;
             map_y = start_y + y;
             if (!in_bounds(map_x, map_y)) {
-                append_cell(out, out_size, &first_cell, "~");
+                if (append_cell(out, out_size, &first_cell, "~") != 0) {
+                    return -1;
+                }
             } else if (p->x == map_x && p->y == map_y) {
-                append_cell(out, out_size, &first_cell, "@");
+                if (append_cell(out, out_size, &first_cell, "@") != 0) {
+                    return -1;
+                }
             } else if (p->discovered_walls[map_y][map_x]) {
-                append_cell(out, out_size, &first_cell, "#");
+                if (append_cell(out, out_size, &first_cell, "#") != 0) {
+                    return -1;
+                }
             } else {
                 owner = game->owner[map_y][map_x];
-                append_cell(out, out_size, &first_cell,
-                            owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
-                                ? game->players[owner].symbol
-                                : ".");
+                if (append_cell(out, out_size, &first_cell,
+                                owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
+                                    ? game->players[owner].symbol
+                                    : ".") != 0) {
+                    return -1;
+                }
             }
         }
     }
+    return 0;
 }
 
 // Costruisce la mappa pubblica delle proprieta, senza rivelare i muri.
-void game_build_global_map(const game_t *game, char *out, size_t out_size) {
+int game_build_global_map(const game_t *game, char *out, size_t out_size) {
     int y;
     int x;
     int owner;
 
+    if (out_size == 0) {
+        return -1;
+    }
     out[0] = '\0';
     for (y = 0; y < MAP_H; ++y) {
         int first_cell = 1;
         if (y > 0) {
-            append_text(out, out_size, "/");
+            if (append_text(out, out_size, "/") != 0) {
+                return -1;
+            }
         }
         for (x = 0; x < MAP_W; ++x) {
             owner = game->owner[y][x];
-            append_cell(out, out_size, &first_cell,
-                        owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
-                            ? game->players[owner].symbol
-                            : ".");
+            if (append_cell(out, out_size, &first_cell,
+                            owner >= 0 && (size_t)owner < game->player_count && game->players[owner].used
+                                ? game->players[owner].symbol
+                                : ".") != 0) {
+                return -1;
+            }
         }
     }
+    return 0;
 }
 
 // Codifica nickname, identificatore e coordinate dei giocatori online.
-void game_build_positions(const game_t *game, char *out, size_t out_size) {
+int game_build_positions(const game_t *game, char *out, size_t out_size) {
     size_t i;
     char tmp[128];
 
+    if (out_size == 0) {
+        return -1;
+    }
     out[0] = '\0';
     for (i = 0; i < game->player_count; ++i) {
         if (game->players[i].active) {
             if (out[0] != '\0') {
-                append_text(out, out_size, ",");
+                if (append_text(out, out_size, ",") != 0) {
+                    return -1;
+                }
             }
             snprintf(tmp, sizeof(tmp), "%s:%s:%d:%d",
                      game->players[i].nickname,
                      game->players[i].symbol,
                      game->players[i].x,
                      game->players[i].y);
-            append_text(out, out_size, tmp);
+            if (append_text(out, out_size, tmp) != 0) {
+                return -1;
+            }
         }
     }
     if (out[0] == '\0') {
-        append_text(out, out_size, "-");
+        if (append_text(out, out_size, "-") != 0) {
+            return -1;
+        }
     }
+    return 0;
 }
 
 // Calcola e codifica il punteggio di tutti gli slot giocatore usati.
-void game_build_scores(const game_t *game, char *out, size_t out_size) {
+int game_build_scores(const game_t *game, char *out, size_t out_size) {
     int *scores;
     int y;
     int x;
     size_t i;
     char tmp[96];
 
+    if (out_size == 0) {
+        return -1;
+    }
     scores = calloc(game->player_count == 0 ? 1 : game->player_count, sizeof(*scores));
     if (scores == NULL) {
         snprintf(out, out_size, "-");
-        return;
+        return -1;
     }
     out[0] = '\0';
     for (y = 0; y < MAP_H; ++y) {
@@ -562,16 +613,26 @@ void game_build_scores(const game_t *game, char *out, size_t out_size) {
     for (i = 0; i < game->player_count; ++i) {
         if (game->players[i].used) {
             if (out[0] != '\0') {
-                append_text(out, out_size, ",");
+                if (append_text(out, out_size, ",") != 0) {
+                    free(scores);
+                    return -1;
+                }
             }
             snprintf(tmp, sizeof(tmp), "%s:%d", game->players[i].nickname, scores[i]);
-            append_text(out, out_size, tmp);
+            if (append_text(out, out_size, tmp) != 0) {
+                free(scores);
+                return -1;
+            }
         }
     }
     if (out[0] == '\0') {
-        append_text(out, out_size, "-");
+        if (append_text(out, out_size, "-") != 0) {
+            free(scores);
+            return -1;
+        }
     }
     free(scores);
+    return 0;
 }
 
 // Trova il giocatore con piu celle possedute e restituisce nickname/punteggio.

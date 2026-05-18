@@ -35,10 +35,10 @@ int game_add_player(game_t *game, const char *nickname);
 void game_remove_player(game_t *game, int player_id);
 int game_find_player(const game_t *game, const char *nickname);
 int game_move(game_t *game, int player_id, direction_t dir);
-void game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size);
-void game_build_global_map(const game_t *game, char *out, size_t out_size);
-void game_build_positions(const game_t *game, char *out, size_t out_size);
-void game_build_scores(const game_t *game, char *out, size_t out_size);
+int game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size);
+int game_build_global_map(const game_t *game, char *out, size_t out_size);
+int game_build_positions(const game_t *game, char *out, size_t out_size);
+int game_build_scores(const game_t *game, char *out, size_t out_size);
 int game_winner(const game_t *game, char *nickname, size_t nickname_size, int *score);
 
 #endif

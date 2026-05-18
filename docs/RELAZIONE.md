@@ -136,6 +136,8 @@ Il server mantiene:
 
 La funzione `game_init` sceglie casualmente uno dei layout statici disponibili. La funzione `game_move` valida i confini, controlla i muri, aggiorna posizione e proprieta e richiama la rivelazione locale degli ostacoli adiacenti. La mappa locale inviata dopo login, movimento o richiesta esplicita e una finestra 11x11 centrata sul giocatore, contenente solo i muri scoperti da quel giocatore e le proprieta pubbliche nelle celle della finestra.
 
+Le funzioni che costruiscono mappe, posizioni e punteggi controllano la dimensione dei buffer e segnalano errore se il payload non entra nella riga di protocollo. In questo modo il server evita troncamenti silenziosi e puo rispondere con `S2C_ERR ENCODING_FAILED`.
+
 La funzione `server_run` costruisce il set di descrittori per `select`, accetta nuove connessioni, legge messaggi completi dai client e verifica periodicamente i timer.
 
 Il client interpreta i comandi utente e li traduce nel protocollo applicativo. Gli aggiornamenti ricevuti dal server sono renderizzati direttamente su terminale.

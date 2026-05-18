@@ -162,6 +162,9 @@ static int process_socket(int fd, client_ctx_t *ctx, char *buf, size_t *len) {
     char tmp[512];
     ssize_t n = recv(fd, tmp, sizeof(tmp), 0);
 
+    if (n < 0 && errno == EINTR) {
+        return 0;
+    }
     if (n <= 0) {
         ui_set_connected(&ctx->ui, 0);
         ui_add_event(&ctx->ui, "Connessione chiusa dal server");

@@ -112,7 +112,10 @@ static int send_local(server_t *s, client_session_t *c)
     char map[PROTO_MAX_LINE];
     if (c->authenticated && c->player_id >= 0)
     {
-        game_build_local_map(&s->game, c->player_id, map, sizeof(map));
+        if (game_build_local_map(&s->game, c->player_id, map, sizeof(map)) != 0)
+        {
+            return sendf(c, "S2C_ERR ENCODING_FAILED");
+        }
         return sendf(c, "S2C_LOCAL_MAP %d %d %s", LOCAL_VIEW_W, LOCAL_VIEW_H, map);
     }
     return 0;
@@ -125,8 +128,11 @@ static int send_global_to_client(server_t *s, client_session_t *c)
     char pos[PROTO_MAX_LINE];
     if (c->fd >= 0 && c->authenticated)
     {
-        game_build_global_map(&s->game, map, sizeof(map));
-        game_build_positions(&s->game, pos, sizeof(pos));
+        if (game_build_global_map(&s->game, map, sizeof(map)) != 0 ||
+            game_build_positions(&s->game, pos, sizeof(pos)) != 0)
+        {
+            return sendf(c, "S2C_ERR ENCODING_FAILED");
+        }
         return sendf(c, "S2C_GLOBAL_UPDATE %d %d %s %s", MAP_W, MAP_H, map, pos);
     }
     return 0;
@@ -331,7 +337,11 @@ static void handle_users(server_t *s, client_session_t *c)
     {
         return;
     }
-    game_build_positions(&s->game, pos, sizeof(pos));
+    if (game_build_positions(&s->game, pos, sizeof(pos)) != 0)
+    {
+        sendf(c, "S2C_ERR ENCODING_FAILED");
+        return;
+    }
     sendf(c, "S2C_USERS %s", pos);
 }
 
@@ -402,6 +412,10 @@ static int read_client(server_t *s, int index)
     ssize_t n;
 
     n = recv(c->fd, tmp, sizeof(tmp), 0);
+    if (n < 0 && errno == EINTR)
+    {
+        return 0;
+    }
     if (n <= 0)
     {
         disconnect_client(s, index);
@@ -455,7 +469,10 @@ static void broadcast_game_over(server_t *s)
     int score;
 
     game_winner(&s->game, winner, sizeof(winner), &score);
-    game_build_scores(&s->game, scores, sizeof(scores));
+    if (game_build_scores(&s->game, scores, sizeof(scores)) != 0)
+    {
+        snprintf(scores, sizeof(scores), "-");
+    }
     for (i = 0; i < s->client_count; ++i)
     {
         if (s->clients[i].fd >= 0)
