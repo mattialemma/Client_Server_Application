@@ -39,6 +39,12 @@ Avvio client:
 ./bin/client 127.0.0.1 4242
 ```
 
+`127.0.0.1` va usato solo se il client gira sulla stessa macchina del server. Se il server e remoto, bisogna usare l'IP o il DNS del server, per esempio:
+
+```sh
+./bin/client 203.0.113.10 4242
+```
+
 ## Comandi client
 
 Dopo la connessione:
@@ -74,14 +80,17 @@ docker build -t territory-conquest .
 Server:
 
 ```sh
-docker run --rm --name tc-server -p 4242:4242 territory-conquest ./bin/server 4242 300 5
+docker network create tc-net
+docker run --rm --name tc-server --network tc-net -p 4242:4242 territory-conquest ./bin/server 4242 300 5
 ```
 
 Client:
 
 ```sh
-docker run --rm -it --network host territory-conquest ./bin/client 127.0.0.1 4242
+docker run --rm -it --network tc-net territory-conquest ./bin/client tc-server 4242
 ```
+
+Se il client non e nello stesso network Docker del server, anche qui non va usato `127.0.0.1`: serve il nome DNS del container o l'IP/DNS della macchina remota.
 
 Con Docker Compose:
 

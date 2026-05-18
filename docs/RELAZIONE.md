@@ -24,6 +24,8 @@ Avvio client:
 ./bin/client 127.0.0.1 4242
 ```
 
+L'indirizzo `127.0.0.1` e corretto solo quando client e server sono eseguiti sulla stessa macchina. Se il server gira su un host remoto, il client deve usare l'IP o il DNS di quell'host.
+
 Il server accetta tre parametri: porta, durata della partita in secondi e periodo degli aggiornamenti globali. Il client richiede host e porta.
 
 Comandi client:

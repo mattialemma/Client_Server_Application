@@ -3,15 +3,17 @@
 #include "common/net.h"
 #include "common/protocol.h"
 #include "common/utils.h"
+#include "server/logger.h"
 
 #include <errno.h>
+#include <netdb.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -23,6 +25,7 @@ static void client_reset(client_session_t *c)
     c->fd = -1;
     c->authenticated = 0;
     c->player_id = -1;
+    c->remote_addr[0] = '\0';
     c->nickname[0] = '\0';
     c->inbuf_len = 0;
 }
@@ -101,9 +104,18 @@ static int sendf(client_session_t *c, const char *fmt, ...)
     }
     if (proto_make_line(line, sizeof(line), "%s", payload) < 0)
     {
+        server_log_error("impossibile formare risposta per fd=%d", c->fd);
         return -1;
     }
-    return net_send_line(c->fd, line);
+    if (net_send_line(c->fd, line) != 0)
+    {
+        server_log_error("invio verso fd=%d (%s) fallito: %s",
+                         c->fd,
+                         c->remote_addr[0] != '\0' ? c->remote_addr : "-",
+                         net_last_error());
+        return -1;
+    }
+    return 0;
 }
 
 // Invia al client la mappa locale del suo giocatore.
@@ -155,6 +167,12 @@ static void broadcast_global(server_t *s)
 static void disconnect_client(server_t *s, int index)
 {
     client_session_t *c = &s->clients[index];
+    char nickname[NICK_MAX + 1];
+    char remote_addr[64];
+    int fd = c->fd;
+
+    snprintf(nickname, sizeof(nickname), "%s", c->nickname[0] != '\0' ? c->nickname : "-");
+    snprintf(remote_addr, sizeof(remote_addr), "%s", c->remote_addr[0] != '\0' ? c->remote_addr : "-");
     if (c->fd >= 0)
     {
         close(c->fd);
@@ -164,6 +182,7 @@ static void disconnect_client(server_t *s, int index)
         // Il giocatore diventa offline, ma i territori restano assegnati al suo slot.
         game_remove_player(&s->game, c->player_id);
     }
+    server_log_info("client disconnesso fd=%d addr=%s nickname=%s", fd, remote_addr, nickname);
     client_reset(c);
 }
 
@@ -171,18 +190,36 @@ static void disconnect_client(server_t *s, int index)
 static void accept_client(server_t *s)
 {
     int fd;
+    struct sockaddr_storage addr;
+    socklen_t addr_len = sizeof(addr);
+    char host[64];
+    char service[16];
+    char remote_addr[64];
     size_t i;
     size_t slot;
 
-    fd = accept(s->listen_fd, NULL, NULL);
+    fd = accept(s->listen_fd, (struct sockaddr *)&addr, &addr_len);
     if (fd < 0)
     {
+        server_log_error("accept fallita: %s", strerror(errno));
         return;
+    }
+    if (getnameinfo((struct sockaddr *)&addr, addr_len,
+                    host, sizeof(host),
+                    service, sizeof(service),
+                    NI_NUMERICHOST | NI_NUMERICSERV) == 0)
+    {
+        snprintf(remote_addr, sizeof(remote_addr), "%s:%s", host, service);
+    }
+    else
+    {
+        snprintf(remote_addr, sizeof(remote_addr), "sconosciuto");
     }
     // select(2) usa fd_set: descrittori oltre FD_SETSIZE non sono gestibili.
     if (fd >= FD_SETSIZE)
     {
         net_send_line(fd, "S2C_ERR SERVER_FULL\n");
+        server_log_error("rifiutata connessione da %s: fd=%d oltre FD_SETSIZE", remote_addr, fd);
         close(fd);
         return;
     }
@@ -192,6 +229,8 @@ static void accept_client(server_t *s)
         {
             client_reset(&s->clients[i]);
             s->clients[i].fd = fd;
+            snprintf(s->clients[i].remote_addr, sizeof(s->clients[i].remote_addr), "%s", remote_addr);
+            server_log_info("connessione accettata fd=%d addr=%s slot=%zu", fd, remote_addr, i);
             sendf(&s->clients[i], "S2C_OK CONNECTED");
             return;
         }
@@ -200,12 +239,15 @@ static void accept_client(server_t *s)
     if (server_reserve_clients(s, s->client_count + 1) != 0)
     {
         net_send_line(fd, "S2C_ERR SERVER_FULL\n");
+        server_log_error("memoria insufficiente, connessione rifiutata da %s", remote_addr);
         close(fd);
         return;
     }
     s->client_count++;
     client_reset(&s->clients[slot]);
     s->clients[slot].fd = fd;
+    snprintf(s->clients[slot].remote_addr, sizeof(s->clients[slot].remote_addr), "%s", remote_addr);
+    server_log_info("connessione accettata fd=%d addr=%s slot=%zu", fd, remote_addr, slot);
     sendf(&s->clients[slot], "S2C_OK CONNECTED");
 }
 
@@ -214,6 +256,7 @@ static int require_auth(client_session_t *c)
 {
     if (!c->authenticated)
     {
+        server_log_error("richiesta non autenticata fd=%d addr=%s", c->fd, c->remote_addr);
         sendf(c, "S2C_ERR NOT_AUTHENTICATED");
         return 0;
     }
@@ -232,18 +275,22 @@ static void handle_register(server_t *s, client_session_t *c, char **tok, int nt
     rc = users_register(&s->users, tok[1], tok[2]);
     if (rc == 0)
     {
+        server_log_info("registrazione completata nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_OK REGISTERED");
     }
     else if (rc == -1)
     {
+        server_log_error("registrazione duplicata nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR USER_EXISTS");
     }
     else if (rc == -2)
     {
+        server_log_error("registrazione non valida nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR INVALID_CREDENTIALS");
     }
     else
     {
+        server_log_error("database utenti pieno per nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR USER_DB_FULL");
     }
 }
@@ -259,22 +306,26 @@ static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
     }
     if (c->authenticated)
     {
+        server_log_error("login duplicato nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR ALREADY_AUTHENTICATED");
         return;
     }
     if (users_authenticate(&s->users, tok[1], tok[2]) != 0)
     {
+        server_log_error("login fallito nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR AUTH_FAILED");
         return;
     }
     if (game_find_player(&s->game, tok[1]) >= 0)
     {
+        server_log_error("utente gia online nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR USER_ALREADY_ONLINE");
         return;
     }
     player_id = game_add_player(&s->game, tok[1]);
     if (player_id < 0)
     {
+        server_log_error("partita piena per nickname=%s addr=%s", tok[1], c->remote_addr);
         sendf(c, "S2C_ERR GAME_FULL");
         return;
     }
@@ -282,6 +333,12 @@ static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
     c->player_id = player_id;
     strncpy(c->nickname, tok[1], NICK_MAX);
     c->nickname[NICK_MAX] = '\0';
+    server_log_info("login riuscito nickname=%s player_id=%s posizione=(%d,%d) addr=%s",
+                    c->nickname,
+                    s->game.players[player_id].symbol,
+                    s->game.players[player_id].x,
+                    s->game.players[player_id].y,
+                    c->remote_addr);
     sendf(c, "S2C_OK LOGGED_IN %s %s %d %d",
           c->nickname,
           s->game.players[player_id].symbol,
@@ -308,22 +365,30 @@ static void handle_move(server_t *s, client_session_t *c, char **tok, int ntok)
     rc = game_move(&s->game, c->player_id, dir);
     if (rc == 0)
     {
+        server_log_info("movimento riuscito nickname=%s posizione=(%d,%d)",
+                        c->nickname,
+                        s->game.players[c->player_id].x,
+                        s->game.players[c->player_id].y);
         sendf(c, "S2C_OK MOVED %d %d", s->game.players[c->player_id].x, s->game.players[c->player_id].y);
     }
     else if (rc == -2)
     {
+        server_log_error("movimento fuori mappa nickname=%s", c->nickname);
         sendf(c, "S2C_ERR OUT_OF_BOUNDS");
     }
     else if (rc == -3)
     {
+        server_log_error("movimento contro muro nickname=%s", c->nickname);
         sendf(c, "S2C_ERR WALL");
     }
     else if (rc == -4)
     {
+        server_log_error("movimento su cella occupata nickname=%s", c->nickname);
         sendf(c, "S2C_ERR OCCUPIED");
     }
     else
     {
+        server_log_error("movimento fallito nickname=%s", c->nickname);
         sendf(c, "S2C_ERR MOVE_FAILED");
     }
     send_local(s, c);
@@ -416,6 +481,10 @@ static int read_client(server_t *s, int index)
     {
         return 0;
     }
+    if (n < 0)
+    {
+        server_log_error("recv fallita fd=%d addr=%s: %s", c->fd, c->remote_addr, strerror(errno));
+    }
     if (n <= 0)
     {
         disconnect_client(s, index);
@@ -423,6 +492,9 @@ static int read_client(server_t *s, int index)
     }
     if (c->inbuf_len + (size_t)n >= sizeof(c->inbuf))
     {
+        server_log_error("linea troppo lunga ricevuta da nickname=%s addr=%s",
+                         c->nickname[0] != '\0' ? c->nickname : "-",
+                         c->remote_addr);
         sendf(c, "S2C_ERR LINE_TOO_LONG");
         disconnect_client(s, index);
         return -1;
@@ -503,15 +575,18 @@ int server_run(const char *port, int duration_sec, int period_sec)
 
     if (listen_fd < 0)
     {
+        server_log_error("avvio server fallito sulla porta %s: %s", port, net_last_error());
         return -1;
     }
     if (listen_fd >= FD_SETSIZE)
     {
+        server_log_error("listen fd=%d oltre FD_SETSIZE", listen_fd);
         close(listen_fd);
         return -1;
     }
     signal(SIGPIPE, SIG_IGN);
     server_init(&s, listen_fd, duration_sec, period_sec);
+    server_log_info("server avviato porta=%s durata=%d periodo=%d", port, duration_sec, period_sec);
 
     while (s.running)
     {
@@ -546,6 +621,7 @@ int server_run(const char *port, int duration_sec, int period_sec)
             {
                 continue;
             }
+            server_log_error("select fallita: %s", strerror(errno));
             break;
         }
         if (rc > 0 && FD_ISSET(s.listen_fd, &rfds))
@@ -563,11 +639,13 @@ int server_run(const char *port, int duration_sec, int period_sec)
         now = time(NULL);
         if (now >= s.next_update)
         {
+            server_log_info("broadcast globale ai client autenticati");
             broadcast_global(&s);
             s.next_update = now + s.period_sec;
         }
         if (now >= s.start_time + s.duration_sec)
         {
+            server_log_info("tempo partita scaduto, invio game over");
             broadcast_game_over(&s);
             s.running = 0;
         }
@@ -579,5 +657,6 @@ int server_run(const char *port, int duration_sec, int period_sec)
     }
     close(s.listen_fd);
     server_free(&s);
+    server_log_info("server arrestato");
     return 0;
 }

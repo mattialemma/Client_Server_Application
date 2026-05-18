@@ -1,0 +1,4 @@
+[2026-05-18 11:38:29] INFO logging inizializzato su server.log
+[2026-05-18 11:38:29] ERROR avvio server fallito sulla porta 4242: bind sulla porta 4242 fallita: Operation not permitted
+[2026-05-18 11:38:29] ERROR terminazione server con errore: bind sulla porta 4242 fallita: Operation not permitted
+[2026-05-18 11:38:29] INFO chiusura logging

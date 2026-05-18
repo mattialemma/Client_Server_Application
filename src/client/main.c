@@ -1,4 +1,5 @@
 #include "client/client.h"
+#include "common/net.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     if (client_run(argv[1], argv[2]) != 0) {
-        fprintf(stderr, "Client terminato con errore\n");
+        fprintf(stderr, "Client terminato con errore: %s\n", net_last_error());
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

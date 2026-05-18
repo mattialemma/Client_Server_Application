@@ -4,7 +4,7 @@ LDFLAGS :=
 
 BIN_DIR := bin
 COMMON_OBJS := build/common/net.o build/common/protocol.o build/common/utils.o
-SERVER_OBJS := build/server/main.o build/server/server.o build/server/game.o build/server/users.o
+SERVER_OBJS := build/server/main.o build/server/server.o build/server/game.o build/server/users.o build/server/logger.o
 CLIENT_OBJS := build/client/main.o build/client/client.o build/client/ui.o
 ALL_OBJS := $(COMMON_OBJS) $(SERVER_OBJS) $(CLIENT_OBJS)
 DEPS := $(ALL_OBJS:.o=.d)

@@ -10,6 +10,7 @@ typedef struct {
     int fd; 
     int authenticated; 
     int player_id;
+    char remote_addr[64];
     char nickname[NICK_MAX + 1];
     char inbuf[PROTO_MAX_LINE];
     size_t inbuf_len;
