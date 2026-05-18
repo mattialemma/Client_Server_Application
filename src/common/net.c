@@ -40,10 +40,12 @@ static int net_send_all(int fd, const char *buf, size_t len)
             {
                 continue;
             }
+            net_set_error("send su fd=%d fallita: %s", fd, strerror(errno));
             return -1;
         }
         if (n == 0)
         {
+            net_set_error("send su fd=%d ha scritto 0 byte", fd);
             return -1;
         }
         sent += (size_t)n;

@@ -106,6 +106,24 @@ docker compose run --rm client
 docker compose run --rm client
 ```
 
+## Log server
+
+Il server scrive diagnostica in `server.log` nella sua directory di lavoro. Con Docker, se usi `--rm`, monta il file sul filesystem host per non perderlo quando il container termina.
+
+PowerShell:
+
+```powershell
+New-Item -ItemType File -Force server.log
+docker run --rm --name tc-server --network tc-net -p 4242:4242 -v "${PWD}\server.log:/app/server.log" territory-conquest ./bin/server 4242 300 5
+```
+
+Bash:
+
+```sh
+touch server.log
+docker run --rm --name tc-server --network tc-net -p 4242:4242 -v "$PWD/server.log:/app/server.log" territory-conquest ./bin/server 4242 300 5
+```
+
 ## Note progettuali
 
 - Server single-process basato esplicitamente su `select(2)`.
