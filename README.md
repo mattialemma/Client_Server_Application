@@ -119,8 +119,3 @@ docker compose run --rm client
 - Nessun database esterno: utenti e stato partita sono mantenuti in memoria.
 - Nessuna libreria esterna oltre a libc/POSIX.
 - Il server non legge da `stdin`.
-
-La relazione tecnica e il protocollo dettagliato sono in:
-
-- `docs/RELAZIONE.md`
-- `docs/PROTOCOLLO.md`
