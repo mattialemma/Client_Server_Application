@@ -5,7 +5,6 @@
 #include "common/utils.h"
 
 #include <errno.h>
-#include <netdb.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -24,8 +23,6 @@ static void client_reset(client_session_t *c)
     c->fd = -1;
     c->authenticated = 0;
     c->player_id = -1;
-    c->remote_addr[0] = '\0';
-    c->nickname[0] = '\0';
     c->inbuf_len = 0;
 }
 
@@ -178,29 +175,13 @@ static void disconnect_client(server_t *s, int index)
 static void accept_client(server_t *s)
 {
     int fd;
-    struct sockaddr_storage addr;
-    socklen_t addr_len = sizeof(addr);
-    char host[64];
-    char service[16];
-    char remote_addr[64];
     size_t i;
     size_t slot;
 
-    fd = accept(s->listen_fd, (struct sockaddr *)&addr, &addr_len);
+    fd = accept(s->listen_fd, NULL, NULL);
     if (fd < 0)
     {
         return;
-    }
-    if (getnameinfo((struct sockaddr *)&addr, addr_len,
-                    host, sizeof(host),
-                    service, sizeof(service),
-                    NI_NUMERICHOST | NI_NUMERICSERV) == 0)
-    {
-        snprintf(remote_addr, sizeof(remote_addr), "%s:%s", host, service);
-    }
-    else
-    {
-        snprintf(remote_addr, sizeof(remote_addr), "sconosciuto");
     }
     // select(2) usa fd_set: descrittori oltre FD_SETSIZE non sono gestibili.
     if (fd >= FD_SETSIZE)
@@ -215,7 +196,6 @@ static void accept_client(server_t *s)
         {
             client_reset(&s->clients[i]);
             s->clients[i].fd = fd;
-            snprintf(s->clients[i].remote_addr, sizeof(s->clients[i].remote_addr), "%s", remote_addr);
             sendf(&s->clients[i], "S2C_OK CONNECTED");
             return;
         }
@@ -230,7 +210,6 @@ static void accept_client(server_t *s)
     s->client_count++;
     client_reset(&s->clients[slot]);
     s->clients[slot].fd = fd;
-    snprintf(s->clients[slot].remote_addr, sizeof(s->clients[slot].remote_addr), "%s", remote_addr);
     sendf(&s->clients[slot], "S2C_OK CONNECTED");
 }
 
@@ -305,10 +284,8 @@ static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
     }
     c->authenticated = 1;
     c->player_id = player_id;
-    strncpy(c->nickname, tok[1], NICK_MAX);
-    c->nickname[NICK_MAX] = '\0';
     sendf(c, "S2C_OK LOGGED_IN %s %s %d %d",
-          c->nickname,
+          tok[1],
           s->game.players[player_id].symbol,
           s->game.players[player_id].x,
           s->game.players[player_id].y);
@@ -440,9 +417,6 @@ static int read_client(server_t *s, int index)
     if (n < 0 && errno == EINTR)
     {
         return 0;
-    }
-    if (n < 0)
-    {
     }
     if (n <= 0)
     {
