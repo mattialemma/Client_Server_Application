@@ -106,30 +106,6 @@ docker compose run --rm client
 docker compose run --rm client
 ```
 
-## Log server
-
-Il server scrive diagnostica in `server.log`. Con Compose il file viene creato nella root del progetto grazie alla variabile `SERVER_LOG_PATH=/host/server.log` e al bind mount configurato in `compose.yaml`.
-
-Per seguire il log da PowerShell:
-
-```powershell
-Get-Content .\server.log -Wait
-```
-
-Se usi `docker run` invece di Compose, monta la directory del progetto e passa la stessa variabile.
-
-PowerShell:
-
-```powershell
-docker run --rm --name tc-server --network tc-net -p 4242:4242 -v "${PWD}:/host" -e SERVER_LOG_PATH=/host/server.log territory-conquest ./bin/server 4242 300 5
-```
-
-Bash:
-
-```sh
-docker run --rm --name tc-server --network tc-net -p 4242:4242 -v "$PWD:/host" -e SERVER_LOG_PATH=/host/server.log territory-conquest ./bin/server 4242 300 5
-```
-
 ## Note progettuali
 
 - Server single-process basato esplicitamente su `select(2)`.
@@ -142,7 +118,7 @@ docker run --rm --name tc-server --network tc-net -p 4242:4242 -v "$PWD:/host" -
 - Ogni giocatore riceve un identificatore testuale stabile (`P0`, `P1`, ...), quindi non c'e collisione dopo le prime lettere/cifre.
 - Nessun database esterno: utenti e stato partita sono mantenuti in memoria.
 - Nessuna libreria esterna oltre a libc/POSIX.
-- Il server non scrive su `stdout` e non legge da `stdin`.
+- Il server non legge da `stdin`.
 
 La relazione tecnica e il protocollo dettagliato sono in:
 

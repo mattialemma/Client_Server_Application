@@ -2,10 +2,6 @@ services:
   server:
     build: .
     command: ["./bin/server", "4242", "300", "5"]
-    environment:
-      SERVER_LOG_PATH: /host/server.log
-    volumes:
-      - .:/host
     ports:
       - "4242:4242"
     healthcheck:
