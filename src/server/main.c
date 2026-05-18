@@ -3,6 +3,7 @@
 #include "server/logger.h"
 #include "server/server.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 // Punto di ingresso del server: valida gli argomenti e avvia server_run().
@@ -10,8 +11,14 @@ int main(int argc, char **argv) {
     int ok;
     long duration = 300;
     long period = 5;
+    const char *log_path = getenv("SERVER_LOG_PATH");
 
-    if (server_log_init("server.log") != 0) {
+    if (log_path == NULL || log_path[0] == '\0') {
+        log_path = "server.log";
+    }
+
+    if (server_log_init(log_path) != 0) {
+        fprintf(stderr, "Impossibile aprire il file di log: %s\n", log_path);
         return EXIT_FAILURE;
     }
 
