@@ -1,0 +1,640 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+\geometry{
+  top=2.4cm,
+  bottom=2.4cm,
+  left=2.5cm,
+  right=2.5cm
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  pdftitle={Relazione progetto client-server},
+  pdfauthor={Mattia Lemma}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Client-Server Application}
+\rhead{Relazione di progetto}
+\cfoot{\thepage}
+
+\setlist[itemize]{itemsep=0.15em, topsep=0.3em}
+\setlist[enumerate]{itemsep=0.15em, topsep=0.3em}
+\renewcommand{\arraystretch}{1.18}
+
+\definecolor{codebg}{RGB}{247,247,247}
+\definecolor{codeframe}{RGB}{210,210,210}
+\definecolor{codecomment}{RGB}{70,120,70}
+\definecolor{codekeyword}{RGB}{20,70,140}
+
+\lstdefinestyle{cstyle}{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codekeyword}\bfseries,
+  commentstyle=\color{codecomment},
+  stringstyle=\color{red!55!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=8pt,
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{codeframe},
+  backgroundcolor=\color{codebg},
+  tabsize=4,
+  captionpos=b
+}
+\lstset{style=cstyle}
+\lstdefinestyle{textstyle}{
+  basicstyle=\ttfamily\small,
+  numbers=none,
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{codeframe},
+  backgroundcolor=\color{codebg},
+  tabsize=2
+}
+
+\newcommand{\projectname}{Labirinto dei Settori}
+\newcommand{\groupmembers}{Mattia Lemma - N86005170}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{1.5cm}
+  {\Large Relazione di progetto\par}
+  \vspace{1.2cm}
+  {\Huge\bfseries \projectname\par}
+  \vspace{0.5cm}
+  {\Large Applicazione client-server in C/POSIX\par}
+  \vfill
+  \begin{tabular}{rl}
+    \textbf{Componenti del gruppo:} & \groupmembers \\
+    \textbf{Architettura:} & Client-server su socket TCP \\
+    \textbf{Build:} & Makefile, Docker, Docker Compose \\
+  \end{tabular}
+  \vfill
+  {\large \today\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Introduzione}
+
+Il progetto \projectname{} realizza un gioco multiplayer a griglia con architettura client-server. Ogni giocatore si collega a un server centrale, registra un profilo, effettua il login e si muove all'interno di una mappa per conquistare celle. La logica della partita e interamente mantenuta dal server: il client non decide autonomamente se una mossa sia valida, non calcola i punteggi finali e non conserva una copia autoritativa della mappa. Questo aspetto e importante perché evita divergenze tra giocatori diversi e rende il server l'unico punto in cui vengono applicate le regole di gioco.
+
+La partita si svolge su una griglia di dimensione fissa pari a \(30 \times 15\). Le celle possono essere libere, occupate da muri oppure conquistate da un giocatore. Il server sceglie casualmente una tra quindici mappe statiche compilate nel sorgente e assegna a ogni giocatore uno spawn casuale su una cella libera e non occupata. Durante il gioco, una mossa valida sposta il giocatore e assegna la proprietà della nuova cella al suo slot. Al termine del tempo configurato, il server calcola il vincitore contando il numero di celle possedute da ciascun giocatore.
+
+L'applicazione è volutamente essenziale dal punto di vista delle dipendenze: usa solo la libreria standard C e le API POSIX necessarie per socket, \texttt{select(2)}, terminale e gestione dei file descriptor. La compilazione nativa è gestita da un \texttt{Makefile}; in alternativa sono presenti un \texttt{Dockerfile} e un file \texttt{compose.yaml} che permettono di avviare server e client in container.
+
+\section{Guida d'uso}
+
+\subsection{Requisiti}
+
+Per l'esecuzione nativa sono necessari un ambiente Linux o compatibile POSIX, \texttt{gcc} e \texttt{make}. Il progetto usa socket, \texttt{select(2)}, \texttt{termios} e altre interfacce POSIX; per questo motivo l'ambiente di riferimento naturale è Linux. La build Docker usa come base \texttt{ubuntu:24.04} e installa \texttt{build-essential} e \texttt{make}.
+
+La struttura principale del progetto è la seguente:
+
+\begin{itemize}
+  \item \texttt{src/server}: contiene il server, il database utenti in memoria e la logica di gioco.
+  \item \texttt{src/client}: contiene il client, la gestione dell'input e l'interfaccia testuale.
+  \item \texttt{src/common}: contiene codice condiviso per rete, protocollo e parsing numerico.
+  \item \texttt{Makefile}: produce gli eseguibili \texttt{bin/server} e \texttt{bin/client}.
+  \item \texttt{Dockerfile} e \texttt{compose.yaml}: permettono l'esecuzione containerizzata.
+\end{itemize}
+
+\subsection{Compilazione nativa}
+
+Dalla radice del progetto è sufficiente eseguire:
+
+\begin{lstlisting}[style=textstyle]
+make
+\end{lstlisting}
+
+Il \texttt{Makefile} compila i moduli comuni, quelli del server e quelli del client con le opzioni:
+
+\begin{lstlisting}[style=textstyle]
+-std=c11 -D_POSIX_C_SOURCE=200112L -Wall -Wextra -Wpedantic -O2 -g -I src
+\end{lstlisting}
+
+Gli oggetti intermedi vengono creati sotto \texttt{build/}; gli eseguibili finali vengono creati sotto \texttt{bin/}:
+
+\begin{lstlisting}[style=textstyle]
+bin/server
+bin/client
+\end{lstlisting}
+\newpage
+Per eliminare build ed eseguibili:
+
+\begin{lstlisting}[style=textstyle]
+make clean
+\end{lstlisting}
+
+Sono presenti anche due target di comodita:
+
+\begin{lstlisting}[style=textstyle]
+make run-server
+make run-client
+\end{lstlisting}
+
+Il primo avvia il server sulla porta \texttt{4242}, con durata di partita pari a \texttt{300} secondi e aggiornamento globale ogni \texttt{5} secondi. Il secondo avvia un client verso \texttt{127.0.0.1:4242}.
+
+\subsection{Avvio del server}
+
+Il server richiede almeno la porta TCP su cui ascoltare. Accetta inoltre due argomenti opzionali: durata della partita e periodo degli aggiornamenti globali.
+
+\begin{lstlisting}[style=textstyle]
+./bin/server <porta> [durata_secondi] [periodo_secondi]
+\end{lstlisting}
+
+Esempio:
+
+\begin{lstlisting}[style=textstyle]
+./bin/server 4242 300 5
+\end{lstlisting}
+
+Gli argomenti hanno il seguente significato:
+
+\begin{itemize}
+  \item \texttt{porta}: porta numerica di ascolto, validata nel range \(1\)-\(65535\).
+  \item \texttt{durata\_secondi}: durata complessiva della partita; se omessa vale \texttt{300}. Il \texttt{main} del server la accetta nel range \(10\)-\(86400\).
+  \item \texttt{periodo\_secondi}: intervallo tra due broadcast globali; se omesso vale \texttt{5}. Il valore ammesso è nel range \(1\)-\(3600\).
+\end{itemize}
+
+Il server non legge da \texttt{stdin}: una volta avviato rimane in ascolto, accetta connessioni, gestisce i comandi dei client e termina automaticamente allo scadere della durata configurata. Al termine invia a tutti i client collegati un messaggio di fine partita con vincitore e punteggi.
+
+\subsection{Avvio del client}
+
+Il client richiede host e porta del server:
+
+\begin{lstlisting}[style=textstyle]
+./bin/client <host> <porta>
+\end{lstlisting}
+
+Esempio su macchina locale:
+
+\begin{lstlisting}[style=textstyle]
+./bin/client 127.0.0.1 4242
+\end{lstlisting}
+
+Se il server gira su una macchina remota, \texttt{127.0.0.1} non deve essere usato: occorre indicare l'indirizzo IP o il nome DNS raggiungibile del server, per esempio:
+
+\begin{lstlisting}[style=textstyle]
+./bin/client 203.0.113.10 4242
+\end{lstlisting}
+
+Il client apre una connessione TCP verso il server usando \texttt{getaddrinfo()} e prova gli endpoint restituiti finche una connessione riesce. Una volta collegato, mostra un'interfaccia testuale con stato della connessione, eventi recenti, vista locale, mappa globale se disponibile e riga di comando.
+\newpage
+\subsection{Comandi disponibili nel client}
+
+Dopo la connessione, il client accetta i seguenti comandi:
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}p{5.2cm}p{8.5cm}}
+\toprule
+\normalfont\textbf{Comando} & \textbf{Effetto} \\
+\midrule
+register <nickname> <password> & Registra un nuovo profilo nel database utenti in memoria del server. \\
+login <nickname> <password> & Autentica l'utente e lo inserisce nella partita. \\
+move up & Richiede uno spostamento verso l'alto. \\
+move down & Richiede uno spostamento verso il basso. \\
+move left & Richiede uno spostamento a sinistra. \\
+move right & Richiede uno spostamento a destra. \\
+users, list, l & Richiede la lista degli utenti attivi con simbolo e coordinate. \\
+local & Richiede la vista locale \(11 \times 11\) centrata sul giocatore. \\
+global & Richiede la mappa globale dei territori e le posizioni attive. \\
+help, h & Mostra/richiama la guida integrata nell'interfaccia. \\
+quit, q & Invia la richiesta di uscita e chiude il client. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In modalita interattiva i tasti \texttt{w}, \texttt{a}, \texttt{s}, \texttt{d} vengono letti immediatamente, senza dover premere Invio, e corrispondono rispettivamente a su, sinistra, giu e destra. Questa scelta è implementata disattivando temporaneamente la modalità canonica del terminale tramite \texttt{termios}. Alla chiusura del client il terminale viene ripristinato.
+
+\subsection{Esecuzione con Docker}
+
+Per costruire l'immagine:
+
+\begin{lstlisting}[style=textstyle]
+docker build -t territory-conquest .
+\end{lstlisting}
+
+Per avviare il server in un network dedicato:
+
+\begin{lstlisting}[style=textstyle]
+docker network create tc-net
+docker run --rm --name tc-server --network tc-net \
+  -p 4242:4242 territory-conquest ./bin/server 4242 300 5
+\end{lstlisting}
+
+Per avviare un client nello stesso network:
+
+\begin{lstlisting}[style=textstyle]
+docker run --rm -it --network tc-net \
+  territory-conquest ./bin/client tc-server 4242
+\end{lstlisting}
+
+Con Docker Compose, il server puo essere avviato con:
+
+\begin{lstlisting}[style=textstyle]
+docker compose up --build server
+\end{lstlisting}
+
+Un client puo essere aperto con:
+
+\begin{lstlisting}[style=textstyle]
+docker compose run --rm client
+\end{lstlisting}
+
+Per aprire più giocatori è sufficiente eseguire il comando del client più volte in terminali diversi.
+
+\section{Protocollo applicativo}
+
+\subsection{Principi generali}
+
+Il protocollo usato tra client e server e un protocollo applicativo testuale. Non coincide con TCP/IP: TCP fornisce soltanto il canale affidabile e ordinato di byte, mentre il progetto definisce sopra tale canale un insieme di messaggi, comandi, risposte, formati e codici di errore.
+
+Ogni messaggio applicativo e una riga di testo terminata da \texttt{\textbackslash n}. Il framing e quindi basato sul carattere newline. Sia client sia server accumulano i byte ricevuti in un buffer e considerano completo un messaggio solo quando trovano \texttt{\textbackslash n}. Questa scelta e necessaria perche TCP e uno stream: una \texttt{send()} puo essere ricevuta in piu \texttt{recv()}, oppure piu righe possono arrivare insieme.
+
+I messaggi client-server iniziano con il prefisso \texttt{C2S\_}; i messaggi server-client iniziano con il prefisso \texttt{S2C\_}. I campi sono separati da spazi o tabulazioni e vengono tokenizzati con la funzione comune \texttt{proto\_split}. Il limite massimo di riga e \texttt{PROTO\_MAX\_LINE}, pari a \texttt{16384} byte; il numero massimo di token considerati e \texttt{PROTO\_MAX\_TOKENS}, pari a \texttt{32}.
+
+\subsection{Comandi dal client al server}
+
+\begin{longtable}{>{\ttfamily}p{5.6cm}p{8.2cm}}
+\toprule
+\normalfont\textbf{Messaggio} & \textbf{Significato applicativo} \\
+\midrule
+\endhead
+
+C2S\_REGISTER \textless nick\textgreater{} \textless pass\textgreater{} & Registra un utente. Nickname e password devono essere non vuoti, lunghi al massimo \texttt{31} caratteri e composti solo da lettere, numeri, underscore o trattino. \\
+C2S\_LOGIN \textless nick\textgreater{} \textless pass\textgreater{} & Autentica l'utente e lo associa a uno slot giocatore. Se il login riesce, il server assegna simbolo, posizione iniziale e invia la vista locale. \\
+C2S\_MOVE UP & Richiede una mossa verso l'alto. \\
+C2S\_MOVE DOWN & Richiede una mossa verso il basso. \\
+C2S\_MOVE LEFT & Richiede una mossa verso sinistra. \\
+C2S\_MOVE RIGHT & Richiede una mossa verso destra. \\
+C2S\_LIST\_USERS & Richiede l'elenco dei giocatori attivi. \\
+C2S\_LOCAL\_MAP & Richiede la vista locale del giocatore autenticato. \\
+C2S\_GLOBAL\_MAP & Richiede la mappa globale dei territori e le posizioni attive. \\
+C2S\_QUIT & Richiede la disconnessione ordinata. \\
+
+\bottomrule
+\end{longtable}
+
+Il client traduce i comandi utente in questi messaggi. Per esempio, \texttt{register mario segreta} diventa \texttt{C2S\_REGISTER mario segreta}; il tasto \texttt{w} o il comando \texttt{move up} diventano entrambi \texttt{C2S\_MOVE UP}.
+
+\subsection{Risposte e notifiche dal server}
+
+\begin{longtable}{>{\ttfamily}p{6.3cm}p{7.5cm}}
+\toprule
+\normalfont\textbf{Messaggio} & \textbf{Significato applicativo} \\
+\midrule
+\endhead
+
+S2C\_OK CONNECTED & Connessione accettata. Viene inviato subito dopo l'accept. \\
+S2C\_OK REGISTERED & Registrazione completata con successo. \\
+S2C\_OK LOGGED\_IN \textless nick\textgreater{} \textless symbol\textgreater{} \textless x\textgreater{} \textless y\textgreater{} & Login completato. Il server comunica nickname, simbolo stabile e coordinate iniziali. \\
+S2C\_OK MOVED \textless x\textgreater{} \textless y\textgreater{} & Mossa valida; il server comunica la nuova posizione. \\
+S2C\_OK BYE & Uscita accettata. \\
+S2C\_LOCAL\_MAP \textless w\textgreater{} \textless h\textgreater{} \textless map\textgreater{} & Vista locale centrata sul giocatore. Nel progetto \texttt{w=11} e \texttt{h=11}. \\
+S2C\_GLOBAL\_UPDATE \textless w\textgreater{} \textless h\textgreater{} \textless map\textgreater{} \textless positions\textgreater{} & Aggiornamento globale, inviato su richiesta o periodicamente. Nel progetto \texttt{w=30} e \texttt{h=15}. \\
+S2C\_USERS \textless positions\textgreater{} & Lista compatta dei giocatori attivi. \\
+S2C\_GAME\_OVER \textless winner\textgreater{} \textless score\textgreater{} \textless scores\textgreater{} & Fine partita, con vincitore, punteggio vincente e riepilogo di tutti i punteggi. \\
+S2C\_ERR \textless code\textgreater{} & Errore applicativo. Il codice specifica il motivo. \\
+
+\bottomrule
+\end{longtable}
+
+I principali codici di errore prodotti dal server sono:
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}p{4.9cm}p{8.8cm}}
+\toprule
+\normalfont\textbf{Errore} & \textbf{Condizione} \\
+\midrule
+
+BAD\_SYNTAX & Messaggio con numero di token errato o forma non valida. \\
+UNKNOWN\_COMMAND & Messaggio non riconosciuto e senza prefisso \texttt{C2S\_}. \\
+NOT\_AUTHENTICATED & Comando di gioco richiesto prima del login. \\
+USER\_EXISTS & Registrazione di un nickname gia presente. \\
+INVALID\_CREDENTIALS & Nickname o password non rispettano i vincoli sintattici. \\
+AUTH\_FAILED & Login con credenziali errate. \\
+ALREADY\_AUTHENTICATED & Login richiesto da una sessione gia autenticata. \\
+USER\_ALREADY\_ONLINE & Lo stesso nickname e gia attivo in partita. \\
+GAME\_FULL & Impossibile inserire il giocatore, ad esempio per assenza di celle libere. \\
+OUT\_OF\_BOUNDS & Movimento fuori dai confini della mappa. \\
+WALL & Movimento verso una cella muro. \\
+OCCUPIED & Movimento verso una cella occupata da un altro giocatore attivo. \\
+LINE\_TOO\_LONG & Riga ricevuta oltre il limite del buffer. \\
+ENCODING\_FAILED & Errore nella serializzazione di mappa, posizioni o punteggi. \\
+SERVER\_FULL & Server impossibilitato ad accettare nuovi client. \\
+
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Codifica di mappe, posizioni e punteggi}
+
+Le mappe vengono inviate come una singola stringa testuale. Le celle della stessa riga sono separate da virgole, mentre le righe sono separate da slash. Una mappa \(3 \times 2\), per esempio, avrebbe forma:
+
+\begin{lstlisting}[style=textstyle]
+.,P0,./P1,#,.
+\end{lstlisting}
+
+I simboli applicativi usati nella codifica sono:
+
+\begin{itemize}
+  \item \texttt{.}: cella libera o non posseduta.
+  \item \texttt{@}: posizione del giocatore nella vista locale.
+  \item \texttt{\#}: muro scoperto dal giocatore nella vista locale.
+  \item \texttt{\textasciitilde}: cella fuori mappa nella vista locale.
+  \item \texttt{P0}, \texttt{P1}, ...: cella conquistata dal giocatore associato allo slot indicato.
+\end{itemize}
+
+La vista locale è privata: mostra una finestra \(11 \times 11\) centrata sul giocatore, include i muri che quel giocatore ha scoperto e usa \texttt{\textasciitilde} per le celle fuori dai bordi. La mappa globale è pubblica ma intenzionalmente meno informativa: mostra soltanto la proprieta delle celle e non rivela la disposizione dei muri non scoperti.
+
+Le posizioni sono codificate come una lista separata da virgole. Ogni elemento ha forma:
+
+\begin{lstlisting}[style=textstyle]
+nickname:symbol:x:y
+\end{lstlisting}
+
+Esempio:
+
+\begin{lstlisting}[style=textstyle]
+alice:P0:10:4,bob:P1:20:7
+\end{lstlisting}
+
+Se non ci sono giocatori attivi, la lista vale \texttt{-}. I punteggi finali seguono una codifica analoga, \texttt{nickname:punteggio}, separata da virgole; anche in questo caso \texttt{-} indica lista vuota.
+
+\subsection{Esempio di sessione applicativa}
+
+Una possibile sequenza di scambio è la seguente:
+
+\begin{lstlisting}[style=textstyle]
+S2C_OK CONNECTED
+C2S_REGISTER alice pass1
+S2C_OK REGISTERED
+C2S_LOGIN alice pass1
+S2C_OK LOGGED_IN alice P0 12 8
+S2C_LOCAL_MAP 11 11 ...
+S2C_GLOBAL_UPDATE 30 15 ... alice:P0:12:8
+C2S_MOVE UP
+S2C_OK MOVED 12 7
+S2C_LOCAL_MAP 11 11 ...
+\end{lstlisting}
+
+L'ordine mostra due aspetti importanti. Primo, il server può inviare più messaggi in risposta a un singolo comando: dopo un login riuscito invia conferma, vista locale e aggiornamento globale. Secondo, gli aggiornamenti globali non sono soltanto risposte dirette: il server li invia anche periodicamente a tutti i client autenticati.
+
+\section{Dettagli implementativi}
+
+\subsection{Organizzazione modulare}
+
+Il codice è diviso in tre aree. La cartella \texttt{src/common} contiene funzionalità condivise: creazione e connessione dei socket, invio affidabile delle righe, tokenizzazione dei messaggi e parsing numerico. La cartella \texttt{src/server} contiene lo stato autoritativo: sessioni client, database utenti, mappa, giocatori, proprieta delle celle e timer di partita. La cartella \texttt{src/client} contiene la traduzione dei comandi utente nel protocollo, la ricezione delle risposte e l'interfaccia testuale.
+
+Questa separazione permette di mantenere il protocollo in un modulo comune, evitando duplicazioni tra client e server. Per esempio, entrambe le parti usano \texttt{proto\_make\_line()} per garantire che ogni messaggio finisca con newline e \texttt{proto\_split()} per dividere una riga in token.
+
+\subsection{Framing robusto su stream TCP}
+
+Una delle scelte più importanti riguarda la gestione dei messaggi. Poiché TCP non conserva i confini applicativi, non è corretto assumere che una chiamata a \texttt{recv()} corrisponda a un comando completo. Il server mantiene quindi un buffer per ogni sessione client e processa solo righe complete.
+
+\begin{lstlisting}[caption={Estrazione di righe complete dal buffer del server, tratto da \texttt{server.c}.}]
+while (1)
+{
+    char *line_break = memchr(session->inbuf, '\n', session->inbuf_len);
+    size_t line_length;
+    char complete_line[PROTO_MAX_LINE];
+
+    if (line_break == NULL)
+    {
+        break;
+    }
+    line_length = (size_t)(line_break - session->inbuf);
+    memcpy(complete_line, session->inbuf, line_length);
+    complete_line[line_length] = '\0';
+    memmove(session->inbuf, line_break + 1,
+            session->inbuf_len - line_length - 1);
+    session->inbuf_len -= line_length + 1;
+    dispatch_client_command(server, session_index, complete_line);
+}
+\end{lstlisting}
+
+Il client applica la stessa idea per le risposte del server. Questa simmetria rende il protocollo più affidabile: un aggiornamento globale molto lungo o più risposte ravvicinate non confondono il parser, purché ogni messaggio rispetti il limite massimo di riga.
+
+\subsection{Invio completo dei buffer}
+
+Anche l'invio richiede attenzione: \texttt{send()} può scrivere meno byte di quelli richiesti. Per questo il modulo comune \texttt{net.c} implementa un ciclo \texttt{net\_send\_all()} che continua finché tutto il buffer è stato inviato oppure si verifica un errore reale.
+
+\begin{lstlisting}[caption={Invio completo dei byte, tratto da \texttt{net.c}.}]
+static int net_send_all(int fd, const char *buffer, size_t buffer_length)
+{
+    size_t bytes_sent = 0;
+
+    while (bytes_sent < buffer_length)
+    {
+        ssize_t sent_now = send(fd, buffer + bytes_sent,
+                                buffer_length - bytes_sent, 0);
+        if (sent_now < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            return -1;
+        }
+        if (sent_now == 0)
+        {
+            return -1;
+        }
+        bytes_sent += (size_t)sent_now;
+    }
+    return 0;
+}
+\end{lstlisting}
+
+Questa funzione viene usata da \texttt{net\_send\_line()}, che spedisce righe già formate. Il server e il client ignorano inoltre \texttt{SIGPIPE}, cosi un tentativo di scrittura su socket chiuso non termina brutalmente il processo.
+
+\subsection{Server single-process con \texttt{select}}
+
+Il server è single-process e single-thread. Tutte le connessioni vengono multiplexate con \texttt{select(2)}: il set dei descrittori contiene sempre il socket di ascolto e tutti i socket client attivi. A ogni iterazione il server calcola anche un timeout, usato per svegliarsi al momento del prossimo aggiornamento globale o della fine partita.
+
+\begin{lstlisting}[caption={Schema del ciclo principale del server, tratto da \texttt{server.c}.}]
+FD_ZERO(&readable_fds);
+FD_SET(server.listen_fd, &readable_fds);
+for (session_index = 0; session_index < server.client_count; ++session_index)
+{
+    if (server.clients[session_index].fd >= 0)
+    {
+        FD_SET(server.clients[session_index].fd, &readable_fds);
+        if (server.clients[session_index].fd > max_fd)
+        {
+            max_fd = server.clients[session_index].fd;
+        }
+    }
+}
+
+timeout.tv_sec = seconds_until_next_server_event(&server);
+timeout.tv_usec = 0;
+select_result = select(max_fd + 1, &readable_fds, NULL, NULL, &timeout);
+\end{lstlisting}
+
+Questa soluzione è coerente con l'obiettivo del progetto: evitare thread e sincronizzazione esplicita, mantenendo comunque la capacità di gestire più client contemporaneamente. Il limite principale è quello tipico di \texttt{select}: i file descriptor devono essere inferiori a \texttt{FD\_SETSIZE}, e infatti il codice rifiuta connessioni con descriptor troppo alto.
+
+\subsection{Sessioni client e disconnessione}
+
+Ogni connessione è rappresentata da una \texttt{client\_session\_t}, che memorizza file descriptor, stato di autenticazione, id del giocatore e buffer di input. L'array delle sessioni cresce dinamicamente con \texttt{realloc}; quando un client si disconnette, lo slot può essere riutilizzato.
+
+La disconnessione non cancella la storia del giocatore. Se un utente aveva conquistato celle, quelle celle restano assegnate al suo slot anche quando il client va offline. La funzione di disconnessione chiude il socket, segna il giocatore come inattivo e pulisce la sessione, ma non azzera la proprietà delle celle.
+
+\begin{lstlisting}[caption={Disconnessione di una sessione, tratto da \texttt{server.c}.}]
+static void disconnect_session(server_t *server, int session_index)
+{
+    client_session_t *session = &server->clients[session_index];
+
+    if (session->fd >= 0)
+    {
+        close(session->fd);
+    }
+    if (session->authenticated && session->player_id >= 0)
+    {
+        game_remove_player(&server->game, session->player_id);
+    }
+    clear_client_session(session);
+}
+\end{lstlisting}
+
+Questa scelta consente di calcolare punteggi finali che tengono conto anche di giocatori non più connessi, ma che hanno effettivamente conquistato territorio durante la partita.
+
+\subsection{Database utenti in memoria}
+
+Il database utenti è un array dinamico di strutture \texttt{user\_t}, ciascuna con nickname e password. Non esiste persistenza su file o database esterno: alla chiusura del server tutte le registrazioni vengono perse. La registrazione controlla tre condizioni: validità sintattica, assenza di duplicati e spazio disponibile nell'array.
+
+La validazione delle credenziali accetta solo caratteri alfanumerici, underscore e trattino. La lunghezza massima di nickname e password è \texttt{31} caratteri. L'autenticazione è un confronto diretto tra stringhe memorizzate in memoria. In un sistema reale servirebbero hashing e persistenza, ma per questo progetto la scelta è coerente con l'obiettivo di concentrarsi su comunicazione, multiplexing e logica di gioco.
+
+\subsection{Stato di gioco e proprietà delle celle}
+
+Lo stato della partita è descritto dalla struttura \texttt{game\_t}: contiene la matrice dei muri, la matrice dei proprietari e l'array dei giocatori. Ogni proprietario è indicato con l'indice dello slot giocatore; \texttt{-1} rappresenta una cella senza proprietario.
+
+\begin{lstlisting}[caption={Strutture principali del gioco, tratte da \texttt{game.h}.}]
+typedef struct {
+    char nickname[NICK_MAX + 1];
+    int active;
+    int used;
+    char symbol[PLAYER_SYMBOL_MAX];
+    int x;
+    int y;
+    unsigned char discovered_walls[MAP_H][MAP_W];
+} player_t;
+
+typedef struct {
+    int wall[MAP_H][MAP_W];
+    int owner[MAP_H][MAP_W];
+    player_t *players;
+    size_t player_count;
+    size_t player_capacity;
+} game_t;
+\end{lstlisting}
+
+La distinzione tra \texttt{active} e \texttt{used} è significativa. \texttt{active} indica che il giocatore è online; \texttt{used} indica che quello slot è stato assegnato almeno una volta. In questo modo uno slot può restare proprietario di celle anche se il giocatore non è connesso. Il simbolo testuale \texttt{P0}, \texttt{P1}, ... è stabile per slot e viene usato nelle mappe e nella UI.
+
+\subsection{Spawn e movimento}
+
+Quando un giocatore effettua il login, il server cerca una cella libera e non occupata. La funzione di spawn esegue due passaggi: prima conta tutte le celle valide, poi sceglie casualmente la \(k\)-esima cella libera. Questo evita di allocare una lista temporanea di coordinate.
+
+Il movimento controlla in ordine: validità del giocatore, nuova coordinata, confini della mappa, presenza di muro e presenza di altri giocatori attivi. Solo se tutti i controlli passano il giocatore viene spostato e la cella diventa di sua proprietà.
+
+\begin{lstlisting}[caption={Regole principali del movimento, tratte da \texttt{game.c}.}]
+if (!is_inside_map(nx, ny)) {
+    return -2;
+}
+if (game->wall[ny][nx]) {
+    p->discovered_walls[ny][nx] = 1;
+    reveal_walls_around_player(game, player_id);
+    return -3;
+}
+for (i = 0; i < game->player_count; ++i) {
+    if ((int)i != player_id && game->players[i].active &&
+        game->players[i].x == nx && game->players[i].y == ny) {
+        return -4;
+    }
+}
+p->x = nx;
+p->y = ny;
+game->owner[ny][nx] = player_id;
+reveal_walls_around_player(game, player_id);
+return 0;
+\end{lstlisting}
+
+I codici di ritorno interni vengono tradotti dal server in messaggi applicativi \texttt{S2C\_OK MOVED}, \texttt{S2C\_ERR OUT\_OF\_BOUNDS}, \texttt{S2C\_ERR WALL} o \texttt{S2C\_ERR OCCUPIED}.
+
+\subsection{Nebbia di guerra e viste della mappa}
+
+Un dettaglio interessante è la gestione dei muri scoperti. La matrice dei muri è nota al server, ma non viene rivelata globalmente. Ogni giocatore possiede una matrice \texttt{discovered\_walls}; quando si trova vicino a un muro o tenta di entrarci, quel muro viene marcato come scoperto solo per lui.
+
+\begin{lstlisting}[caption={Rivelazione locale dei muri, tratta da \texttt{game.c}.}]
+for (dy = -1; dy <= 1; ++dy) {
+    for (dx = -1; dx <= 1; ++dx) {
+        x = p->x + dx;
+        y = p->y + dy;
+        if (is_inside_map(x, y) && game->wall[y][x]) {
+            p->discovered_walls[y][x] = 1;
+        }
+    }
+}
+\end{lstlisting}
+
+La vista locale è una finestra \(11 \times 11\) centrata sul giocatore. Nella sua costruzione il server inserisce \texttt{@} per la posizione corrente, \texttt{\#} per i muri già scoperti, \texttt{\textasciitilde} fuori dalla mappa, il simbolo del proprietario se la cella è conquistata, altrimenti \texttt{.}. La mappa globale, invece, non mostra i muri: contiene solo proprietari e celle libere. Questo crea una distinzione netta tra informazione privata e informazione pubblica.
+
+\subsection{Aggiornamenti periodici e fine partita}
+
+Il server mantiene \texttt{start\_time} e \texttt{next\_update}. La funzione \texttt{seconds\_until\_next\_server\_event()} calcola il timeout di \texttt{select} confrontando la prossima scadenza di broadcast con la scadenza finale della partita. Se il tempo corrente supera \texttt{next\_update}, il server invia a tutti i client autenticati un \texttt{S2C\_GLOBAL\_UPDATE}; se supera la durata totale, invia \texttt{S2C\_GAME\_OVER} e termina.
+
+Il punteggio è calcolato contando quante celle hanno come proprietario lo slot di ciascun giocatore. Il vincitore è il giocatore \texttt{used} con punteggio massimo. In caso di assenza di giocatori, il server usa il simbolo \texttt{-} e punteggio \texttt{0}.
+
+\subsection{Client interattivo}
+
+Il client usa a sua volta \texttt{select(2)} per attendere contemporaneamente due sorgenti: il socket del server e \texttt{stdin}. Questo permette di ricevere aggiornamenti periodici mentre l'utente sta digitando. In modalità terminale interattiva, il client passa a una modalità non canonica: i tasti rapidi \texttt{w/a/s/d} vengono inviati subito come movimento.
+
+L'interfaccia viene ridisegnata interamente a ogni aggiornamento significativo. Lo stato visualizzato è contenuto in una struttura \texttt{ui\_state\_t}: connessione, nickname, simbolo, posizione, mappe serializzate, posizioni e registro degli ultimi eventi. Per gli eventi viene usato un ring buffer fisso di sei messaggi, scelta semplice che evita allocazioni dinamiche nella UI.
+
+\subsection{Limiti noti}
+
+Il progetto è funzionale rispetto agli obiettivi richiesti, ma presenta alcuni limiti consapevoli:
+
+\begin{itemize}
+  \item Il database utenti è solo in memoria e non sopravvive al riavvio del server.
+  \item Le password sono salvate in chiaro, scelta accettabile solo in un contesto didattico.
+  \item Il server usa \texttt{select}, quindi il numero massimo di file descriptor è vincolato da \texttt{FD\_SETSIZE}.
+  \item Non esiste cifratura applicativa: la sicurezza del canale non è un obiettivo di questa implementazione.
+  \item Le mappe sono statiche e compilate nel sorgente; non vengono caricate da file esterni.
+\end{itemize}
+
+Questi limiti non compromettono la dimostrazione dei concetti centrali del progetto: protocollo applicativo, gestione di più client, framing testuale, stato autoritativo lato server, aggiornamenti periodici e UI client reattiva.
+
+\section{Conclusioni}
+
+Il progetto realizza una vera applicazione client-server con protocollo applicativo esplicito e stato condiviso gestito centralmente. La parte più rilevante non è l'uso di TCP in se, ma la definizione del livello applicativo costruito sopra lo stream: comandi \texttt{C2S}, risposte \texttt{S2C}, framing a newline, codifica di mappe e posizioni, errori applicativi e notifiche periodiche.
+
+Dal punto di vista implementativo, le scelte più significative sono il server single-process basato su \texttt{select}, la gestione robusta dei buffer di ricezione, l'invio completo dei messaggi, la separazione tra vista locale e vista globale, la persistenza degli slot giocatore durante le disconnessioni e l'interfaccia client capace di gestire input e rete contemporaneamente. Nel complesso il codice rimane compatto, portabile in ambiente POSIX e coerente con una consegna centrata su comunicazione client-server e coordinamento dello stato di gioco.
+
+\end{document}
