@@ -4,11 +4,12 @@
 #include <errno.h>
 #include <stdlib.h>
 
-// Converte una stringa in long e valida che sia nel range richiesto.
+// Questo helper mi serve per parse robusti degli argomenti numerici: converto,
+// controllo il range e restituisco anche un flag esplicito di validita.
 long utils_parse_long(const char *s, long min_value, long max_value, int *ok)
 {
-    char *end = NULL;
-    long value;
+    char *parse_end = NULL;
+    long parsed_value;
 
     if (ok != NULL)
     {
@@ -19,8 +20,9 @@ long utils_parse_long(const char *s, long min_value, long max_value, int *ok)
         return 0;
     }
     errno = 0;
-    value = strtol(s, &end, 10);
-    if (errno != 0 || end == s || *end != '\0' || value < min_value || value > max_value)
+    parsed_value = strtol(s, &parse_end, 10);
+    if (errno != 0 || parse_end == s || *parse_end != '\0' ||
+        parsed_value < min_value || parsed_value > max_value)
     {
         return 0;
     }
@@ -28,5 +30,5 @@ long utils_parse_long(const char *s, long min_value, long max_value, int *ok)
     {
         *ok = 1;
     }
-    return value;
+    return parsed_value;
 }

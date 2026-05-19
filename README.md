@@ -1,8 +1,9 @@
-# Territory Conquest TCP
 
-Progetto didattico in C/POSIX per UNIX/Linux: sistema client-server multiutente via TCP per un gioco di conquista territorio su griglia.
+## Descrizione del progetto
 
-Il server mantiene la mappa completa, lo stato dei giocatori e il timeout globale della partita. I client vedono pubblicamente la proprieta delle celle, ma scoprono gli ostacoli solo quando entrano nella zona esplorata dal proprio giocatore.
+Questo progetto e un gioco client-server su griglia in cui ogni giocatore si collega al server, effettua il login e si muove nella mappa per conquistare piu celle possibili. Il server gestisce tutta la logica della partita, tiene traccia dei territori occupati, delle posizioni dei giocatori e della durata complessiva della sessione.
+
+Dal lato client ogni giocatore vede la propria vista locale, puo chiedere anche la situazione globale della mappa e riceve aggiornamenti periodici. I muri non sono visibili subito a tutta la mappa: vengono scoperti solo esplorando, quindi il gioco unisce movimento, orientamento e conquista del territorio.
 
 ## Compilazione nativa
 

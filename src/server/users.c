@@ -5,13 +5,15 @@
 
 #define INITIAL_USERS_CAPACITY 16
 
-// Libera il database utenti mantenuto in memoria.
+// Il database utenti e solo un array dinamico in memoria: niente persistenza,
+// quindi alla chiusura mi basta liberare l'array e azzerare la struttura.
 void users_free(user_db_t *db) {
     free(db->items);
     memset(db, 0, sizeof(*db));
 }
 
-// Garantisce spazio per almeno needed utenti nell'array dinamico.
+// Espando il database raddoppiando la capacita quando serve, cosi mantengo
+// una logica semplice e un numero contenuto di realloc.
 static int users_reserve(user_db_t *db, size_t needed) {
     user_t *new_items;
     size_t new_capacity = db->capacity == 0 ? INITIAL_USERS_CAPACITY : db->capacity;
@@ -42,7 +44,8 @@ static int users_exists(const user_db_t *db, const char *nickname) {
     return 0;
 }
 
-// Registra un nuovo utente dopo validazione di nickname e password.
+// Qui la registrazione e minimale: valido nickname/password, controllo che il
+// nickname non esista gia e poi salvo tutto nel database in memoria.
 int users_register(user_db_t *db, const char *nickname, const char *password) {
     if (!proto_valid_name(nickname, NICK_MAX) || !proto_valid_name(password, PASS_MAX)) {
         return -2;
@@ -61,7 +64,8 @@ int users_register(user_db_t *db, const char *nickname, const char *password) {
     return 0;
 }
 
-// Verifica che nickname e password corrispondano a un utente registrato.
+// L'autenticazione non fa hashing o accessi esterni: per questo progetto basta
+// un confronto diretto sulle credenziali salvate in memoria.
 int users_authenticate(const user_db_t *db, const char *nickname, const char *password) {
     size_t i;
     for (i = 0; i < db->count; ++i) {

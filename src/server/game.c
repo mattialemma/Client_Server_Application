@@ -6,7 +6,7 @@
 #include <time.h>
 
 #define INITIAL_PLAYERS_CAPACITY 16
-#define MAP_COUNT 10
+#define MAP_COUNT 15
 
 static const int WALL_MAPS[MAP_COUNT][MAP_H][MAP_W] = {
     {
@@ -178,37 +178,124 @@ static const int WALL_MAPS[MAP_COUNT][MAP_H][MAP_W] = {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0},
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
+        {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0},
+        {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     }
 };
 
-static void game_reveal_around(game_t *game, int player_id);
+static void reveal_walls_around_player(game_t *game, int player_id);
 
-// Verifica che una coordinata appartenga alla griglia di gioco.
-static int in_bounds(int x, int y) {
+// Tengo questo controllo separato perche compare in molti punti della logica:
+// movimento, rivelazione muri e costruzione delle mappe serializzate.
+static int is_inside_map(int x, int y) {
     return x >= 0 && x < MAP_W && y >= 0 && y < MAP_H;
 }
 
-// Appende testo a un buffer senza superarne la dimensione.
+// Tutta la serializzazione delle mappe e delle liste passa da buffer testuali:
+// qui aggiungo testo in coda senza rischiare di uscire dai limiti.
 static int append_text(char *out, size_t out_size, const char *text) {
-    size_t used;
+    size_t used_length;
     int written;
 
     if (out_size == 0) {
         return -1;
     }
-    used = strlen(out);
-    if (used >= out_size) {
+    used_length = strlen(out);
+    if (used_length >= out_size) {
         return -1;
     }
-    written = snprintf(out + used, out_size - used, "%s", text);
-    if (written < 0 || (size_t)written >= out_size - used) {
+    written = snprintf(out + used_length, out_size - used_length, "%s", text);
+    if (written < 0 || (size_t)written >= out_size - used_length) {
         return -1;
     }
     return 0;
 }
 
 // Genera l'identificatore stabile dello slot giocatore, ad esempio P0.
-static void symbol_for_slot(size_t slot, char *out, size_t out_size) {
+static void build_player_symbol(size_t slot, char *out, size_t out_size) {
     snprintf(out, out_size, "P%zu", slot);
 }
 
@@ -234,23 +321,26 @@ static int game_reserve_players(game_t *game, size_t needed) {
     return 0;
 }
 
-// Sceglie casualmente una cella libera e non occupata da giocatori attivi.
+// Per lo spawn faccio due passaggi: nel primo conto quante celle valide esistono,
+// nel secondo ne scelgo una casualmente. E' semplice e non richiede strutture extra.
 static int find_free_spawn(const game_t *game, int *x, int *y) {
-    int yy;
-    int xx;
-    size_t p;
+    int map_y;
+    int map_x;
+    size_t player_index;
     int occupied;
     int free_count = 0;
     int chosen;
 
-    for (yy = 0; yy < MAP_H; ++yy) {
-        for (xx = 0; xx < MAP_W; ++xx) {
-            if (game->wall[yy][xx]) {
+    for (map_y = 0; map_y < MAP_H; ++map_y) {
+        for (map_x = 0; map_x < MAP_W; ++map_x) {
+            if (game->wall[map_y][map_x]) {
                 continue;
             }
             occupied = 0;
-            for (p = 0; p < game->player_count; ++p) {
-                if (game->players[p].active && game->players[p].x == xx && game->players[p].y == yy) {
+            for (player_index = 0; player_index < game->player_count; ++player_index) {
+                if (game->players[player_index].active &&
+                    game->players[player_index].x == map_x &&
+                    game->players[player_index].y == map_y) {
                     occupied = 1;
                     break;
                 }
@@ -266,22 +356,24 @@ static int find_free_spawn(const game_t *game, int *x, int *y) {
     }
 
     chosen = rand() % free_count;
-    for (yy = 0; yy < MAP_H; ++yy) {
-        for (xx = 0; xx < MAP_W; ++xx) {
-            if (game->wall[yy][xx]) {
+    for (map_y = 0; map_y < MAP_H; ++map_y) {
+        for (map_x = 0; map_x < MAP_W; ++map_x) {
+            if (game->wall[map_y][map_x]) {
                 continue;
             }
             occupied = 0;
-            for (p = 0; p < game->player_count; ++p) {
-                if (game->players[p].active && game->players[p].x == xx && game->players[p].y == yy) {
+            for (player_index = 0; player_index < game->player_count; ++player_index) {
+                if (game->players[player_index].active &&
+                    game->players[player_index].x == map_x &&
+                    game->players[player_index].y == map_y) {
                     occupied = 1;
                     break;
                 }
             }
             if (!occupied) {
                 if (chosen == 0) {
-                    *x = xx;
-                    *y = yy;
+                    *x = map_x;
+                    *y = map_y;
                     return 0;
                 }
                 chosen--;
@@ -292,7 +384,8 @@ static int find_free_spawn(const game_t *game, int *x, int *y) {
     return -1;
 }
 
-// Inizializza proprieta e muri scegliendo una delle mappe statiche disponibili.
+// Lo stato iniziale della partita e volutamente leggero: azzero i proprietari
+// e scelgo una delle mappe di muri gia compilate nel sorgente.
 void game_init(game_t *game) {
     int y;
     int x;
@@ -313,7 +406,8 @@ void game_free(game_t *game) {
     memset(game, 0, sizeof(*game));
 }
 
-// Inserisce o riattiva un giocatore e gli assegna una posizione iniziale.
+// Quando un utente entra in partita provo prima a riutilizzare un suo vecchio
+// slot, poi uno slot libero, e solo se serve ne creo uno nuovo.
 int game_add_player(game_t *game, const char *nickname) {
     size_t i;
     size_t slot = 0;
@@ -352,14 +446,14 @@ int game_add_player(game_t *game, const char *nickname) {
         memset(&game->players[slot], 0, sizeof(game->players[slot]));
         strncpy(game->players[slot].nickname, nickname, NICK_MAX);
         game->players[slot].nickname[NICK_MAX] = '\0';
-        symbol_for_slot(slot, game->players[slot].symbol, sizeof(game->players[slot].symbol));
+        build_player_symbol(slot, game->players[slot].symbol, sizeof(game->players[slot].symbol));
         game->players[slot].used = 1;
     }
     game->players[slot].active = 1;
     game->players[slot].x = x;
     game->players[slot].y = y;
     game->owner[y][x] = slot;
-    game_reveal_around(game, slot);
+    reveal_walls_around_player(game, slot);
     return (int)slot;
 }
 
@@ -381,8 +475,9 @@ int game_find_player(const game_t *game, const char *nickname) {
     return -1;
 }
 
-// Aggiorna i muri scoperti nelle celle adiacenti al giocatore.
-static void game_reveal_around(game_t *game, int player_id) {
+// La "scoperta" dei muri resta locale al giocatore: aggiorno solo la piccola
+// area intorno alla sua posizione corrente.
+static void reveal_walls_around_player(game_t *game, int player_id) {
     int dx;
     int dy;
     int x;
@@ -397,14 +492,15 @@ static void game_reveal_around(game_t *game, int player_id) {
         for (dx = -1; dx <= 1; ++dx) {
             x = p->x + dx;
             y = p->y + dy;
-            if (in_bounds(x, y) && game->wall[y][x]) {
+            if (is_inside_map(x, y) && game->wall[y][x]) {
                 p->discovered_walls[y][x] = 1;
             }
         }
     }
 }
 
-// Esegue un movimento se confini, muri e occupazione lo permettono.
+// Qui concentro tutte le regole del movimento: bordi, muri, celle occupate e
+// conquista del territorio quando il passo va a buon fine.
 int game_move(game_t *game, int player_id, direction_t dir) {
     int nx;
     int ny;
@@ -427,12 +523,12 @@ int game_move(game_t *game, int player_id, direction_t dir) {
         ++nx;
     }
 
-    if (!in_bounds(nx, ny)) {
+    if (!is_inside_map(nx, ny)) {
         return -2;
     }
     if (game->wall[ny][nx]) {
         p->discovered_walls[ny][nx] = 1;
-        game_reveal_around(game, player_id);
+        reveal_walls_around_player(game, player_id);
         return -3;
     }
     for (i = 0; i < game->player_count; ++i) {
@@ -444,7 +540,7 @@ int game_move(game_t *game, int player_id, direction_t dir) {
     p->x = nx;
     p->y = ny;
     game->owner[ny][nx] = player_id;
-    game_reveal_around(game, player_id);
+    reveal_walls_around_player(game, player_id);
     return 0;
 }
 
@@ -462,7 +558,8 @@ static int append_cell(char *out, size_t out_size, int *first_cell, const char *
     return 0;
 }
 
-// Costruisce la finestra 11x11 visibile dal singolo giocatore.
+// La vista locale e una finestra centrata sul giocatore. Fuori dalla mappa
+// uso '~', sulla sua cella uso '@', i muri scoperti sono '#', il resto e territorio.
 int game_build_local_map(const game_t *game, int player_id, char *out, size_t out_size) {
     int y;
     int x;
@@ -494,7 +591,7 @@ int game_build_local_map(const game_t *game, int player_id, char *out, size_t ou
         for (x = 0; x < LOCAL_VIEW_W; ++x) {
             map_x = start_x + x;
             map_y = start_y + y;
-            if (!in_bounds(map_x, map_y)) {
+            if (!is_inside_map(map_x, map_y)) {
                 if (append_cell(out, out_size, &first_cell, "~") != 0) {
                     return -1;
                 }
@@ -520,7 +617,8 @@ int game_build_local_map(const game_t *game, int player_id, char *out, size_t ou
     return 0;
 }
 
-// Costruisce la mappa pubblica delle proprieta, senza rivelare i muri.
+// La mappa globale e piu "povera" apposta: mostra solo la proprieta delle celle
+// e non deve rivelare l'informazione privata sui muri.
 int game_build_global_map(const game_t *game, char *out, size_t out_size) {
     int y;
     int x;
@@ -550,7 +648,8 @@ int game_build_global_map(const game_t *game, char *out, size_t out_size) {
     return 0;
 }
 
-// Codifica nickname, identificatore e coordinate dei giocatori online.
+// Questa lista e pensata per il client: gli basta una stringa compatta con
+// nickname, simbolo e coordinate per mostrare gli esploratori attivi.
 int game_build_positions(const game_t *game, char *out, size_t out_size) {
     size_t i;
     char tmp[128];
@@ -584,23 +683,17 @@ int game_build_positions(const game_t *game, char *out, size_t out_size) {
     return 0;
 }
 
-// Calcola e codifica il punteggio di tutti gli slot giocatore usati.
-int game_build_scores(const game_t *game, char *out, size_t out_size) {
+static int *compute_scores(const game_t *game) {
+    // Il punteggio e semplicemente il numero di celle possedute. Tengo questo
+    // conteggio in un helper unico per riusarlo sia nel riepilogo sia nel vincitore.
     int *scores;
     int y;
     int x;
-    size_t i;
-    char tmp[96];
 
-    if (out_size == 0) {
-        return -1;
-    }
     scores = calloc(game->player_count == 0 ? 1 : game->player_count, sizeof(*scores));
     if (scores == NULL) {
-        snprintf(out, out_size, "-");
-        return -1;
+        return NULL;
     }
-    out[0] = '\0';
     for (y = 0; y < MAP_H; ++y) {
         for (x = 0; x < MAP_W; ++x) {
             if (game->owner[y][x] >= 0 &&
@@ -610,6 +703,25 @@ int game_build_scores(const game_t *game, char *out, size_t out_size) {
             }
         }
     }
+    return scores;
+}
+
+// Qui prendo i punteggi gia calcolati e li serializzo nel formato testuale
+// che il client usa nel riepilogo finale.
+int game_build_scores(const game_t *game, char *out, size_t out_size) {
+    int *scores;
+    size_t i;
+    char tmp[96];
+
+    if (out_size == 0) {
+        return -1;
+    }
+    scores = compute_scores(game);
+    if (scores == NULL) {
+        snprintf(out, out_size, "-");
+        return -1;
+    }
+    out[0] = '\0';
     for (i = 0; i < game->player_count; ++i) {
         if (game->players[i].used) {
             if (out[0] != '\0') {
@@ -635,29 +747,19 @@ int game_build_scores(const game_t *game, char *out, size_t out_size) {
     return 0;
 }
 
-// Trova il giocatore con piu celle possedute e restituisce nickname/punteggio.
+// Il vincitore e semplicemente il giocatore con il punteggio piu alto nel momento
+// in cui la partita termina.
 int game_winner(const game_t *game, char *nickname, size_t nickname_size, int *score) {
     int *scores;
     int best = -1;
     int best_score = -1;
-    int y;
-    int x;
     size_t i;
 
-    scores = calloc(game->player_count == 0 ? 1 : game->player_count, sizeof(*scores));
+    scores = compute_scores(game);
     if (scores == NULL) {
         snprintf(nickname, nickname_size, "-");
         *score = 0;
         return -1;
-    }
-    for (y = 0; y < MAP_H; ++y) {
-        for (x = 0; x < MAP_W; ++x) {
-            if (game->owner[y][x] >= 0 &&
-                (size_t)game->owner[y][x] < game->player_count &&
-                game->players[game->owner[y][x]].used) {
-                scores[game->owner[y][x]]++;
-            }
-        }
     }
     for (i = 0; i < game->player_count; ++i) {
         if (game->players[i].used && scores[i] > best_score) {

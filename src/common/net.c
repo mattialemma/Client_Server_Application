@@ -19,6 +19,8 @@ static char g_net_last_error[256] = "nessun errore di rete registrato";
 
 static void net_set_error(const char *fmt, ...)
 {
+    // Tengo l'ultimo errore in una stringa globale semplice, cosi sia client
+    // sia server possono stamparlo senza doversi portare dietro strutture extra.
     va_list ap;
 
     va_start(ap, fmt);
@@ -26,15 +28,16 @@ static void net_set_error(const char *fmt, ...)
     va_end(ap);
 }
 
-// Invia tutti i byte del buffer, gestendo invii parziali e interruzioni.
-static int net_send_all(int fd, const char *buf, size_t len)
+// send() puo scrivere solo una parte dei byte richiesti: qui continuo finche
+// non ho inviato tutto il buffer oppure incontro un errore reale.
+static int net_send_all(int fd, const char *buffer, size_t buffer_length)
 {
-    size_t sent = 0;
+    size_t bytes_sent = 0;
 
-    while (sent < len)
+    while (bytes_sent < buffer_length)
     {
-        ssize_t n = send(fd, buf + sent, len - sent, 0);
-        if (n < 0)
+        ssize_t sent_now = send(fd, buffer + bytes_sent, buffer_length - bytes_sent, 0);
+        if (sent_now < 0)
         {
             if (errno == EINTR)
             {
@@ -43,12 +46,12 @@ static int net_send_all(int fd, const char *buf, size_t len)
             net_set_error("send su fd=%d fallita: %s", fd, strerror(errno));
             return -1;
         }
-        if (n == 0)
+        if (sent_now == 0)
         {
             net_set_error("send su fd=%d ha scritto 0 byte", fd);
             return -1;
         }
-        sent += (size_t)n;
+        bytes_sent += (size_t)sent_now;
     }
     return 0;
 }
@@ -64,7 +67,8 @@ const char *net_last_error(void)
     return g_net_last_error;
 }
 
-// Crea il socket TCP IPv4 del server, valida la porta e avvia listen().
+// Qui preparo il socket di ascolto del server nel modo piu diretto possibile:
+// valido la porta, creo il socket, abilito il riuso indirizzo e faccio bind+listen.
 int net_create_server_socket(const char *port)
 {
     struct sockaddr_in addr;
@@ -111,35 +115,36 @@ int net_create_server_socket(const char *port)
     return fd;
 }
 
-// Apre una connessione TCP verso host:port usando getaddrinfo().
+// Lato client provo tutti gli endpoint che getaddrinfo() mi restituisce finche
+// non trovo il primo a cui riesco davvero a collegarmi.
 int net_connect_tcp(const char *host, const char *port)
 {
     struct addrinfo hints;
-    struct addrinfo *res = NULL;
-    struct addrinfo *p;
+    struct addrinfo *results = NULL;
+    struct addrinfo *candidate;
     int fd = -1;
-    int gai_rc;
+    int lookup_rc;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    gai_rc = getaddrinfo(host, port, &hints, &res);
-    if (gai_rc != 0)
+    lookup_rc = getaddrinfo(host, port, &hints, &results);
+    if (lookup_rc != 0)
     {
-        net_set_error("risoluzione indirizzo %s:%s fallita: %s", host, port, gai_strerror(gai_rc));
+        net_set_error("risoluzione indirizzo %s:%s fallita: %s", host, port, gai_strerror(lookup_rc));
         return -1;
     }
 
-    for (p = res; p != NULL; p = p->ai_next)
+    for (candidate = results; candidate != NULL; candidate = candidate->ai_next)
     {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        fd = socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
         if (fd < 0)
         {
             net_set_error("socket client fallita per %s:%s: %s", host, port, strerror(errno));
             continue;
         }
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0)
+        if (connect(fd, candidate->ai_addr, candidate->ai_addrlen) == 0)
         {
             break;
         }
@@ -148,7 +153,7 @@ int net_connect_tcp(const char *host, const char *port)
         fd = -1;
     }
 
-    freeaddrinfo(res);
+    freeaddrinfo(results);
     if (fd < 0 && strcmp(g_net_last_error, "nessun errore di rete registrato") == 0)
     {
         net_set_error("nessun endpoint raggiungibile per %s:%s", host, port);

@@ -10,53 +10,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
 #define INITIAL_CLIENTS_CAPACITY 16
 
-// Riporta una sessione client allo stato libero.
-static void client_reset(client_session_t *c)
+/* Stato base e memoria */
+
+// Quando libero una sessione rimetto tutto in uno stato neutro, cosi quello
+// slot puo essere riusato senza trascinarsi dietro dati del client precedente.
+static void clear_client_session(client_session_t *session)
 {
-    c->fd = -1;
-    c->authenticated = 0;
-    c->player_id = -1;
-    c->inbuf_len = 0;
+    session->fd = -1;
+    session->authenticated = 0;
+    session->player_id = -1;
+    session->inbuf_len = 0;
 }
 
-// Inizializza lo stato globale del server e la partita.
-static void server_init(server_t *s, int listen_fd, int duration_sec, int period_sec)
+// Qui preparo il contenitore generale del server: socket di ascolto, timer di
+// partita, database utenti e stato del gioco vero e proprio.
+static void initialize_server_state(server_t *server, int listen_fd, int duration_sec, int period_sec)
 {
-    memset(s, 0, sizeof(*s));
-    s->listen_fd = listen_fd;
-    s->duration_sec = duration_sec;
-    s->period_sec = period_sec;
-    s->running = 1;
-    s->start_time = time(NULL);
-    s->next_update = s->start_time + period_sec;
-    game_init(&s->game);
+    memset(server, 0, sizeof(*server));
+    server->listen_fd = listen_fd;
+    server->duration_sec = duration_sec;
+    server->period_sec = period_sec;
+    server->running = 1;
+    server->start_time = time(NULL);
+    server->next_update = server->start_time + period_sec;
+    game_init(&server->game);
 }
 
 // Libera array dinamici e sottostrutture possedute dal server.
-static void server_free(server_t *s)
+static void release_server_state(server_t *server)
 {
-    free(s->clients);
-    users_free(&s->users);
-    game_free(&s->game);
-    s->clients = NULL;
-    s->client_count = 0;
-    s->client_capacity = 0;
+    free(server->clients);
+    users_free(&server->users);
+    game_free(&server->game);
+    server->clients = NULL;
+    server->client_count = 0;
+    server->client_capacity = 0;
 }
 
 // Garantisce spazio per almeno needed sessioni client.
-static int server_reserve_clients(server_t *s, size_t needed)
+static int ensure_client_capacity(server_t *server, size_t needed)
 {
     // Le sessioni crescono dinamicamente; il limite pratico resta quello di select/OS.
-    client_session_t *new_clients;
-    size_t i;
-    size_t old_capacity = s->client_capacity;
+    client_session_t *resized_sessions;
+    size_t index;
+    size_t old_capacity = server->client_capacity;
     size_t new_capacity = old_capacity == 0 ? INITIAL_CLIENTS_CAPACITY : old_capacity;
 
     while (new_capacity < needed)
@@ -67,394 +71,459 @@ static int server_reserve_clients(server_t *s, size_t needed)
     {
         return 0;
     }
-    new_clients = realloc(s->clients, new_capacity * sizeof(*new_clients));
-    if (new_clients == NULL)
+    resized_sessions = realloc(server->clients, new_capacity * sizeof(*resized_sessions));
+    if (resized_sessions == NULL)
     {
         return -1;
     }
-    s->clients = new_clients;
-    for (i = old_capacity; i < new_capacity; ++i)
+    server->clients = resized_sessions;
+    for (index = old_capacity; index < new_capacity; ++index)
     {
-        client_reset(&s->clients[i]);
+        clear_client_session(&server->clients[index]);
     }
-    s->client_capacity = new_capacity;
+    server->client_capacity = new_capacity;
     return 0;
 }
 
-static void disconnect_client(server_t *s, int index);
+static void disconnect_session(server_t *server, int session_index);
 
-// Costruisce una risposta S2C e la invia come singola riga di protocollo.
-static int sendf(client_session_t *c, const char *fmt, ...)
+/* Invio risposte */
+
+// Tutte le risposte del server passano da qui, cosi ho un solo punto che si
+// occupa di formattare la riga S2C e spedirla sul socket del client.
+static int send_server_message(client_session_t *session, const char *fmt, ...)
 {
     char payload[PROTO_MAX_LINE];
-    char line[PROTO_MAX_LINE];
-    va_list ap;
-    int n;
+    char protocol_line[PROTO_MAX_LINE];
+    va_list args;
+    int written;
 
-    va_start(ap, fmt);
-    n = vsnprintf(payload, sizeof(payload), fmt, ap);
-    va_end(ap);
-    if (n < 0 || (size_t)n >= sizeof(payload))
+    va_start(args, fmt);
+    written = vsnprintf(payload, sizeof(payload), fmt, args);
+    va_end(args);
+    if (written < 0 || (size_t)written >= sizeof(payload))
     {
         return -1;
     }
-    if (proto_make_line(line, sizeof(line), "%s", payload) < 0)
+    if (proto_make_line(protocol_line, sizeof(protocol_line), "%s", payload) < 0)
     {
         return -1;
     }
-    if (net_send_line(c->fd, line) != 0)
+    if (net_send_line(session->fd, protocol_line) != 0)
     {
         return -1;
     }
     return 0;
 }
 
-// Invia al client la mappa locale del suo giocatore.
-static int send_local(server_t *s, client_session_t *c)
+// La vista locale dipende dal giocatore autenticato, quindi la invio solo
+// se la sessione e valida e collegata a uno slot di gioco attivo.
+static int send_local_view(server_t *server, client_session_t *session)
 {
-    char map[PROTO_MAX_LINE];
-    if (c->authenticated && c->player_id >= 0)
+    char encoded_map[PROTO_MAX_LINE];
+
+    if (session->authenticated && session->player_id >= 0)
     {
-        if (game_build_local_map(&s->game, c->player_id, map, sizeof(map)) != 0)
+        if (game_build_local_map(&server->game, session->player_id, encoded_map, sizeof(encoded_map)) != 0)
         {
-            return sendf(c, "S2C_ERR ENCODING_FAILED");
+            return send_server_message(session, "S2C_ERR ENCODING_FAILED");
         }
-        return sendf(c, "S2C_LOCAL_MAP %d %d %s", LOCAL_VIEW_W, LOCAL_VIEW_H, map);
+        return send_server_message(session, "S2C_LOCAL_MAP %d %d %s", LOCAL_VIEW_W, LOCAL_VIEW_H, encoded_map);
     }
     return 0;
 }
 
-// Invia a un client la vista globale pubblica dello stato di gioco.
-static int send_global_to_client(server_t *s, client_session_t *c)
+// La vista globale e pubblica: mostra i territori e le posizioni, ma non i muri.
+static int send_global_view(server_t *server, client_session_t *session)
 {
-    char map[PROTO_MAX_LINE];
-    char pos[PROTO_MAX_LINE];
-    if (c->fd >= 0 && c->authenticated)
+    char encoded_map[PROTO_MAX_LINE];
+    char encoded_positions[PROTO_MAX_LINE];
+
+    if (session->fd >= 0 && session->authenticated)
     {
-        if (game_build_global_map(&s->game, map, sizeof(map)) != 0 ||
-            game_build_positions(&s->game, pos, sizeof(pos)) != 0)
+        if (game_build_global_map(&server->game, encoded_map, sizeof(encoded_map)) != 0 ||
+            game_build_positions(&server->game, encoded_positions, sizeof(encoded_positions)) != 0)
         {
-            return sendf(c, "S2C_ERR ENCODING_FAILED");
+            return send_server_message(session, "S2C_ERR ENCODING_FAILED");
         }
-        return sendf(c, "S2C_GLOBAL_UPDATE %d %d %s %s", MAP_W, MAP_H, map, pos);
+        return send_server_message(session, "S2C_GLOBAL_UPDATE %d %d %s %s",
+                                   MAP_W, MAP_H, encoded_map, encoded_positions);
     }
     return 0;
 }
 
-// Invia l'aggiornamento globale a tutti i client autenticati.
-static void broadcast_global(server_t *s)
+// Questo broadcast e l'aggiornamento periodico della partita. Se un client non
+// riesce piu a ricevere, preferisco scollegarlo e mantenere coerente il server.
+static void broadcast_global_view(server_t *server)
 {
-    size_t i;
+    size_t index;
 
-    for (i = 0; i < s->client_count; ++i)
+    for (index = 0; index < server->client_count; ++index)
     {
-        if (send_global_to_client(s, &s->clients[i]) != 0)
+        if (send_global_view(server, &server->clients[index]) != 0)
         {
-            disconnect_client(s, i);
+            disconnect_session(server, (int)index);
         }
     }
 }
 
-// Chiude una connessione e aggiorna lo stato del giocatore associato.
-static void disconnect_client(server_t *s, int index)
+// Alla fine della partita invio a tutti lo stesso riepilogo, cosi ogni client
+// puo chiudere la sessione mostrando vincitore e punteggi finali.
+static void broadcast_game_summary(server_t *server)
 {
-    client_session_t *c = &s->clients[index];
-    if (c->fd >= 0)
+    size_t index;
+    char winner_name[NICK_MAX + 1];
+    char encoded_scores[PROTO_MAX_LINE];
+    int winner_score;
+
+    game_winner(&server->game, winner_name, sizeof(winner_name), &winner_score);
+    if (game_build_scores(&server->game, encoded_scores, sizeof(encoded_scores)) != 0)
     {
-        close(c->fd);
+        snprintf(encoded_scores, sizeof(encoded_scores), "-");
     }
-    if (c->authenticated && c->player_id >= 0)
+    for (index = 0; index < server->client_count; ++index)
+    {
+        if (server->clients[index].fd >= 0)
+        {
+            send_server_message(&server->clients[index], "S2C_GAME_OVER %s %d %s",
+                                winner_name, winner_score, encoded_scores);
+        }
+    }
+}
+
+/* Connessioni */
+
+// Disconnettere non significa cancellare tutto: chiudo il socket, segno il
+// giocatore offline, ma lascio intatti i territori che aveva gia conquistato.
+static void disconnect_session(server_t *server, int session_index)
+{
+    client_session_t *session = &server->clients[session_index];
+
+    if (session->fd >= 0)
+    {
+        close(session->fd);
+    }
+    if (session->authenticated && session->player_id >= 0)
     {
         // Il giocatore diventa offline, ma i territori restano assegnati al suo slot.
-        game_remove_player(&s->game, c->player_id);
+        game_remove_player(&server->game, session->player_id);
     }
-    client_reset(c);
+    clear_client_session(session);
 }
 
-// Accetta una nuova connessione e la inserisce in uno slot disponibile.
-static void accept_client(server_t *s)
+// Quando arriva un nuovo client cerco prima uno slot libero gia esistente; se
+// non lo trovo espando l'array delle sessioni e ne creo uno nuovo.
+static void accept_new_client(server_t *server)
 {
-    int fd;
-    size_t i;
-    size_t slot;
+    int client_fd;
+    size_t index;
+    size_t free_slot;
 
-    fd = accept(s->listen_fd, NULL, NULL);
-    if (fd < 0)
+    client_fd = accept(server->listen_fd, NULL, NULL);
+    if (client_fd < 0)
     {
         return;
     }
     // select(2) usa fd_set: descrittori oltre FD_SETSIZE non sono gestibili.
-    if (fd >= FD_SETSIZE)
+    if (client_fd >= FD_SETSIZE)
     {
-        net_send_line(fd, "S2C_ERR SERVER_FULL\n");
-        close(fd);
+        net_send_line(client_fd, "S2C_ERR SERVER_FULL\n");
+        close(client_fd);
         return;
     }
-    for (i = 0; i < s->client_count; ++i)
+    for (index = 0; index < server->client_count; ++index)
     {
-        if (s->clients[i].fd < 0)
+        if (server->clients[index].fd < 0)
         {
-            client_reset(&s->clients[i]);
-            s->clients[i].fd = fd;
-            sendf(&s->clients[i], "S2C_OK CONNECTED");
+            clear_client_session(&server->clients[index]);
+            server->clients[index].fd = client_fd;
+            send_server_message(&server->clients[index], "S2C_OK CONNECTED");
             return;
         }
     }
-    slot = s->client_count;
-    if (server_reserve_clients(s, s->client_count + 1) != 0)
+    free_slot = server->client_count;
+    if (ensure_client_capacity(server, server->client_count + 1) != 0)
     {
-        net_send_line(fd, "S2C_ERR SERVER_FULL\n");
-        close(fd);
+        net_send_line(client_fd, "S2C_ERR SERVER_FULL\n");
+        close(client_fd);
         return;
     }
-    s->client_count++;
-    client_reset(&s->clients[slot]);
-    s->clients[slot].fd = fd;
-    sendf(&s->clients[slot], "S2C_OK CONNECTED");
+    server->client_count++;
+    clear_client_session(&server->clients[free_slot]);
+    server->clients[free_slot].fd = client_fd;
+    send_server_message(&server->clients[free_slot], "S2C_OK CONNECTED");
 }
 
-// Controlla che il comando richiedente appartenga a un client autenticato.
-static int require_auth(client_session_t *c)
+/* Validazioni e comandi */
+
+// Alcuni comandi hanno senso solo dopo il login: con questo controllo evito di
+// ripetere la stessa guardia in tanti punti diversi.
+static int require_authenticated_session(client_session_t *session)
 {
-    if (!c->authenticated)
+    if (!session->authenticated)
     {
-        sendf(c, "S2C_ERR NOT_AUTHENTICATED");
+        send_server_message(session, "S2C_ERR NOT_AUTHENTICATED");
         return 0;
     }
     return 1;
 }
 
-// Gestisce C2S_REGISTER.
-static void handle_register(server_t *s, client_session_t *c, char **tok, int ntok)
+// Register tocca solo il database utenti: qui non creo ancora nessun giocatore
+// nella partita, mi limito a validare e salvare le credenziali.
+static void handle_register_command(server_t *server, client_session_t *session,
+                                    char **tokens, int token_count)
 {
-    int rc;
-    if (ntok != 3)
+    int result;
+
+    if (token_count != 3)
     {
-        sendf(c, "S2C_ERR BAD_SYNTAX");
+        send_server_message(session, "S2C_ERR BAD_SYNTAX");
         return;
     }
-    rc = users_register(&s->users, tok[1], tok[2]);
-    if (rc == 0)
+    result = users_register(&server->users, tokens[1], tokens[2]);
+    if (result == 0)
     {
-        sendf(c, "S2C_OK REGISTERED");
+        send_server_message(session, "S2C_OK REGISTERED");
     }
-    else if (rc == -1)
+    else if (result == -1)
     {
-        sendf(c, "S2C_ERR USER_EXISTS");
+        send_server_message(session, "S2C_ERR USER_EXISTS");
     }
-    else if (rc == -2)
+    else if (result == -2)
     {
-        sendf(c, "S2C_ERR INVALID_CREDENTIALS");
+        send_server_message(session, "S2C_ERR INVALID_CREDENTIALS");
     }
     else
     {
-        sendf(c, "S2C_ERR USER_DB_FULL");
+        send_server_message(session, "S2C_ERR USER_DB_FULL");
     }
 }
 
-// Gestisce C2S_LOGIN e crea la presenza del giocatore nella partita.
-static void handle_login(server_t *s, client_session_t *c, char **tok, int ntok)
+// Login e il punto in cui collego autenticazione e gioco: se le credenziali
+// sono corrette, allora assegno anche uno slot/posizione dentro la mappa.
+static void handle_login_command(server_t *server, client_session_t *session,
+                                 char **tokens, int token_count)
 {
     int player_id;
-    if (ntok != 3)
+
+    if (token_count != 3)
     {
-        sendf(c, "S2C_ERR BAD_SYNTAX");
+        send_server_message(session, "S2C_ERR BAD_SYNTAX");
         return;
     }
-    if (c->authenticated)
+    if (session->authenticated)
     {
-        sendf(c, "S2C_ERR ALREADY_AUTHENTICATED");
+        send_server_message(session, "S2C_ERR ALREADY_AUTHENTICATED");
         return;
     }
-    if (users_authenticate(&s->users, tok[1], tok[2]) != 0)
+    if (users_authenticate(&server->users, tokens[1], tokens[2]) != 0)
     {
-        sendf(c, "S2C_ERR AUTH_FAILED");
+        send_server_message(session, "S2C_ERR AUTH_FAILED");
         return;
     }
-    if (game_find_player(&s->game, tok[1]) >= 0)
+    if (game_find_player(&server->game, tokens[1]) >= 0)
     {
-        sendf(c, "S2C_ERR USER_ALREADY_ONLINE");
+        send_server_message(session, "S2C_ERR USER_ALREADY_ONLINE");
         return;
     }
-    player_id = game_add_player(&s->game, tok[1]);
+    player_id = game_add_player(&server->game, tokens[1]);
     if (player_id < 0)
     {
-        sendf(c, "S2C_ERR GAME_FULL");
+        send_server_message(session, "S2C_ERR GAME_FULL");
         return;
     }
-    c->authenticated = 1;
-    c->player_id = player_id;
-    sendf(c, "S2C_OK LOGGED_IN %s %s %d %d",
-          tok[1],
-          s->game.players[player_id].symbol,
-          s->game.players[player_id].x,
-          s->game.players[player_id].y);
-    send_local(s, c);
-    broadcast_global(s);
+    session->authenticated = 1;
+    session->player_id = player_id;
+    send_server_message(session, "S2C_OK LOGGED_IN %s %s %d %d",
+                        tokens[1],
+                        server->game.players[player_id].symbol,
+                        server->game.players[player_id].x,
+                        server->game.players[player_id].y);
+    send_local_view(server, session);
+    broadcast_global_view(server);
 }
 
-// Gestisce C2S_MOVE e comunica l'esito del movimento.
-static void handle_move(server_t *s, client_session_t *c, char **tok, int ntok)
+static void send_move_result(client_session_t *session, const game_t *game, int move_result)
 {
-    direction_t dir;
-    int rc;
-    if (!require_auth(c))
+    // game_move() mi restituisce codici interni; qui li traduco nei messaggi
+    // leggibili dal protocollo senza sporcare troppo handle_move_command().
+    if (move_result == 0)
     {
-        return;
+        send_server_message(session, "S2C_OK MOVED %d %d",
+                            game->players[session->player_id].x,
+                            game->players[session->player_id].y);
     }
-    if (ntok != 2 || proto_parse_direction(tok[1], &dir) != 0)
+    else if (move_result == -2)
     {
-        sendf(c, "S2C_ERR BAD_DIRECTION");
-        return;
+        send_server_message(session, "S2C_ERR OUT_OF_BOUNDS");
     }
-    rc = game_move(&s->game, c->player_id, dir);
-    if (rc == 0)
+    else if (move_result == -3)
     {
-        sendf(c, "S2C_OK MOVED %d %d", s->game.players[c->player_id].x, s->game.players[c->player_id].y);
+        send_server_message(session, "S2C_ERR WALL");
     }
-    else if (rc == -2)
+    else if (move_result == -4)
     {
-        sendf(c, "S2C_ERR OUT_OF_BOUNDS");
-    }
-    else if (rc == -3)
-    {
-        sendf(c, "S2C_ERR WALL");
-    }
-    else if (rc == -4)
-    {
-        sendf(c, "S2C_ERR OCCUPIED");
+        send_server_message(session, "S2C_ERR OCCUPIED");
     }
     else
     {
-        sendf(c, "S2C_ERR MOVE_FAILED");
+        send_server_message(session, "S2C_ERR MOVE_FAILED");
     }
-    send_local(s, c);
 }
 
-// Gestisce C2S_LIST_USERS.
-static void handle_users(server_t *s, client_session_t *c)
+// Move ha un flusso lineare: controllo login, valido la direzione, provo il
+// movimento e poi aggiorno sempre la vista locale del giocatore.
+static void handle_move_command(server_t *server, client_session_t *session,
+                                char **tokens, int token_count)
 {
-    char pos[PROTO_MAX_LINE];
-    if (!require_auth(c))
+    direction_t direction;
+    int result;
+
+    if (!require_authenticated_session(session))
     {
         return;
     }
-    if (game_build_positions(&s->game, pos, sizeof(pos)) != 0)
+    if (token_count != 2 || proto_parse_direction(tokens[1], &direction) != 0)
     {
-        sendf(c, "S2C_ERR ENCODING_FAILED");
+        send_server_message(session, "S2C_ERR BAD_DIRECTION");
         return;
     }
-    sendf(c, "S2C_USERS %s", pos);
+    result = game_move(&server->game, session->player_id, direction);
+    send_move_result(session, &server->game, result);
+    send_local_view(server, session);
 }
 
-// Smista una riga C2S verso il gestore del comando corrispondente.
-static void handle_line(server_t *s, int index, char *line)
+// Questo comando non interroga un database separato: serializzo semplicemente
+// i giocatori online partendo dallo stato della partita.
+static void handle_users_command(server_t *server, client_session_t *session)
 {
-    client_session_t *c = &s->clients[index];
-    char *tok[PROTO_MAX_TOKENS];
-    int ntok = proto_split(line, tok, PROTO_MAX_TOKENS);
+    char encoded_positions[PROTO_MAX_LINE];
 
-    if (ntok == 0)
+    if (!require_authenticated_session(session))
     {
         return;
     }
-    if (strcmp(tok[0], "C2S_REGISTER") == 0)
+    if (game_build_positions(&server->game, encoded_positions, sizeof(encoded_positions)) != 0)
     {
-        handle_register(s, c, tok, ntok);
+        send_server_message(session, "S2C_ERR ENCODING_FAILED");
+        return;
     }
-    else if (strcmp(tok[0], "C2S_LOGIN") == 0)
+    send_server_message(session, "S2C_USERS %s", encoded_positions);
+}
+
+// Questo e il punto in cui "smonto" una riga ricevuta dal client e la porto
+// al gestore corretto in base al comando C2S.
+static void dispatch_client_command(server_t *server, int session_index, char *line)
+{
+    client_session_t *session = &server->clients[session_index];
+    char *tokens[PROTO_MAX_TOKENS];
+    int token_count = proto_split(line, tokens, PROTO_MAX_TOKENS);
+
+    if (token_count == 0)
     {
-        handle_login(s, c, tok, ntok);
+        return;
     }
-    else if (strcmp(tok[0], "C2S_MOVE") == 0)
+    if (strcmp(tokens[0], "C2S_REGISTER") == 0)
     {
-        handle_move(s, c, tok, ntok);
+        handle_register_command(server, session, tokens, token_count);
     }
-    else if (strcmp(tok[0], "C2S_LIST_USERS") == 0 && ntok == 1)
+    else if (strcmp(tokens[0], "C2S_LOGIN") == 0)
     {
-        handle_users(s, c);
+        handle_login_command(server, session, tokens, token_count);
     }
-    else if (strcmp(tok[0], "C2S_LOCAL_MAP") == 0 && ntok == 1)
+    else if (strcmp(tokens[0], "C2S_MOVE") == 0)
     {
-        if (require_auth(c))
+        handle_move_command(server, session, tokens, token_count);
+    }
+    else if (strcmp(tokens[0], "C2S_LIST_USERS") == 0 && token_count == 1)
+    {
+        handle_users_command(server, session);
+    }
+    else if (strcmp(tokens[0], "C2S_LOCAL_MAP") == 0 && token_count == 1)
+    {
+        if (require_authenticated_session(session))
         {
-            send_local(s, c);
+            send_local_view(server, session);
         }
     }
-    else if (strcmp(tok[0], "C2S_GLOBAL_MAP") == 0 && ntok == 1)
+    else if (strcmp(tokens[0], "C2S_GLOBAL_MAP") == 0 && token_count == 1)
     {
-        if (require_auth(c))
+        if (require_authenticated_session(session))
         {
-            if (send_global_to_client(s, c) != 0)
+            if (send_global_view(server, session) != 0)
             {
-                disconnect_client(s, index);
+                disconnect_session(server, session_index);
             }
         }
     }
-    else if (strcmp(tok[0], "C2S_QUIT") == 0 && ntok == 1)
+    else if (strcmp(tokens[0], "C2S_QUIT") == 0 && token_count == 1)
     {
-        sendf(c, "S2C_OK BYE");
-        disconnect_client(s, index);
+        send_server_message(session, "S2C_OK BYE");
+        disconnect_session(server, session_index);
     }
-    else if (strncmp(tok[0], "C2S_", 4) == 0)
+    else if (strncmp(tokens[0], "C2S_", 4) == 0)
     {
-        sendf(c, "S2C_ERR BAD_SYNTAX");
+        send_server_message(session, "S2C_ERR BAD_SYNTAX");
     }
     else
     {
-        sendf(c, "S2C_ERR UNKNOWN_COMMAND");
+        send_server_message(session, "S2C_ERR UNKNOWN_COMMAND");
     }
 }
 
-// Legge dal socket client e processa tutte le righe complete ricevute.
-static int read_client(server_t *s, int index)
-{
-    client_session_t *c = &s->clients[index];
-    char tmp[512];
-    ssize_t n;
+/* Lettura socket e timer */
 
-    n = recv(c->fd, tmp, sizeof(tmp), 0);
-    if (n < 0 && errno == EINTR)
+// Anche lato server devo ricordarmi che TCP e uno stream: per questo tengo
+// un buffer per sessione e processo una riga completa alla volta.
+static int process_client_socket(server_t *server, int session_index)
+{
+    client_session_t *session = &server->clients[session_index];
+    char incoming_chunk[512];
+    ssize_t bytes_read;
+
+    bytes_read = recv(session->fd, incoming_chunk, sizeof(incoming_chunk), 0);
+    if (bytes_read < 0 && errno == EINTR)
     {
         return 0;
     }
-    if (n <= 0)
+    if (bytes_read <= 0)
     {
-        disconnect_client(s, index);
+        disconnect_session(server, session_index);
         return -1;
     }
-    if (c->inbuf_len + (size_t)n >= sizeof(c->inbuf))
+    if (session->inbuf_len + (size_t)bytes_read >= sizeof(session->inbuf))
     {
-        sendf(c, "S2C_ERR LINE_TOO_LONG");
-        disconnect_client(s, index);
+        send_server_message(session, "S2C_ERR LINE_TOO_LONG");
+        disconnect_session(server, session_index);
         return -1;
     }
-    memcpy(c->inbuf + c->inbuf_len, tmp, (size_t)n);
-    c->inbuf_len += (size_t)n;
-    c->inbuf[c->inbuf_len] = '\0';
+    memcpy(session->inbuf + session->inbuf_len, incoming_chunk, (size_t)bytes_read);
+    session->inbuf_len += (size_t)bytes_read;
+    session->inbuf[session->inbuf_len] = '\0';
 
     while (1)
     {
-        char *nl = memchr(c->inbuf, '\n', c->inbuf_len);
-        size_t line_len;
-        char line[PROTO_MAX_LINE];
-        if (nl == NULL)
+        char *line_break = memchr(session->inbuf, '\n', session->inbuf_len);
+        size_t line_length;
+        char complete_line[PROTO_MAX_LINE];
+
+        if (line_break == NULL)
         {
             break;
         }
-        line_len = (size_t)(nl - c->inbuf);
-        if (line_len >= sizeof(line))
+        line_length = (size_t)(line_break - session->inbuf);
+        if (line_length >= sizeof(complete_line))
         {
-            disconnect_client(s, index);
+            disconnect_session(server, session_index);
             return -1;
         }
-        memcpy(line, c->inbuf, line_len);
-        line[line_len] = '\0';
-        memmove(c->inbuf, nl + 1, c->inbuf_len - line_len - 1);
-        c->inbuf_len -= line_len + 1;
-        c->inbuf[c->inbuf_len] = '\0';
-        handle_line(s, index, line);
-        if (c->fd < 0)
+        memcpy(complete_line, session->inbuf, line_length);
+        complete_line[line_length] = '\0';
+        memmove(session->inbuf, line_break + 1, session->inbuf_len - line_length - 1);
+        session->inbuf_len -= line_length + 1;
+        session->inbuf[session->inbuf_len] = '\0';
+        dispatch_client_command(server, session_index, complete_line);
+        if (session->fd < 0)
         {
             return -1;
         }
@@ -462,45 +531,28 @@ static int read_client(server_t *s, int index)
     return 0;
 }
 
-// Invia a tutti i client il risultato finale della partita.
-static void broadcast_game_over(server_t *s)
-{
-    size_t i;
-    char winner[NICK_MAX + 1];
-    char scores[PROTO_MAX_LINE];
-    int score;
-
-    game_winner(&s->game, winner, sizeof(winner), &score);
-    if (game_build_scores(&s->game, scores, sizeof(scores)) != 0)
-    {
-        snprintf(scores, sizeof(scores), "-");
-    }
-    for (i = 0; i < s->client_count; ++i)
-    {
-        if (s->clients[i].fd >= 0)
-        {
-            sendf(&s->clients[i], "S2C_GAME_OVER %s %d %s", winner, score, scores);
-        }
-    }
-}
-
-// Calcola il timeout da passare a select per il prossimo evento temporizzato.
-static long seconds_until_next_event(server_t *s)
+// select non mi serve solo per i socket: qui lo uso anche per "svegliarmi"
+// quando arriva il momento del prossimo broadcast o della fine partita.
+static long seconds_until_next_server_event(server_t *server)
 {
     time_t now = time(NULL);
-    time_t end = s->start_time + s->duration_sec;
-    time_t next = s->next_update < end ? s->next_update : end;
-    if (next <= now)
+    time_t end_time = server->start_time + server->duration_sec;
+    time_t next_deadline = server->next_update < end_time ? server->next_update : end_time;
+
+    if (next_deadline <= now)
     {
         return 0;
     }
-    return (long)(next - now);
+    return (long)(next_deadline - now);
 }
 
-// Avvia il server: socket di ascolto, ciclo select, timer e cleanup finale.
+/* Loop principale */
+
+// Questo e il ciclo principale del server: ascolto nuove connessioni, leggo i
+// client gia presenti e gestisco gli eventi temporizzati della partita.
 int server_run(const char *port, int duration_sec, int period_sec)
 {
-    server_t s;
+    server_t server;
     int listen_fd = net_create_server_socket(port);
 
     if (listen_fd < 0)
@@ -513,36 +565,36 @@ int server_run(const char *port, int duration_sec, int period_sec)
         return -1;
     }
     signal(SIGPIPE, SIG_IGN);
-    server_init(&s, listen_fd, duration_sec, period_sec);
+    initialize_server_state(&server, listen_fd, duration_sec, period_sec);
 
-    while (s.running)
+    while (server.running)
     {
-        fd_set rfds;
-        struct timeval tv;
-        int maxfd = s.listen_fd;
-        int rc;
-        size_t i;
+        fd_set readable_fds;
+        struct timeval timeout;
+        int max_fd = server.listen_fd;
+        int select_result;
+        size_t session_index;
         time_t now;
 
-        FD_ZERO(&rfds);
-        FD_SET(s.listen_fd, &rfds);
-        for (i = 0; i < s.client_count; ++i)
+        FD_ZERO(&readable_fds);
+        FD_SET(server.listen_fd, &readable_fds);
+        for (session_index = 0; session_index < server.client_count; ++session_index)
         {
-            if (s.clients[i].fd >= 0)
+            if (server.clients[session_index].fd >= 0)
             {
-                FD_SET(s.clients[i].fd, &rfds);
-                if (s.clients[i].fd > maxfd)
+                FD_SET(server.clients[session_index].fd, &readable_fds);
+                if (server.clients[session_index].fd > max_fd)
                 {
-                    maxfd = s.clients[i].fd;
+                    max_fd = server.clients[session_index].fd;
                 }
             }
         }
 
-        tv.tv_sec = seconds_until_next_event(&s);
-        tv.tv_usec = 0;
+        timeout.tv_sec = seconds_until_next_server_event(&server);
+        timeout.tv_usec = 0;
         // select multiplexa socket di ascolto, socket client e timer periodici.
-        rc = select(maxfd + 1, &rfds, NULL, NULL, &tv);
-        if (rc < 0)
+        select_result = select(max_fd + 1, &readable_fds, NULL, NULL, &timeout);
+        if (select_result < 0)
         {
             if (errno == EINTR)
             {
@@ -550,36 +602,37 @@ int server_run(const char *port, int duration_sec, int period_sec)
             }
             break;
         }
-        if (rc > 0 && FD_ISSET(s.listen_fd, &rfds))
+        if (select_result > 0 && FD_ISSET(server.listen_fd, &readable_fds))
         {
-            accept_client(&s);
+            accept_new_client(&server);
         }
-        for (i = 0; i < s.client_count; ++i)
+        for (session_index = 0; session_index < server.client_count; ++session_index)
         {
-            if (s.clients[i].fd >= 0 && FD_ISSET(s.clients[i].fd, &rfds))
+            if (server.clients[session_index].fd >= 0 &&
+                FD_ISSET(server.clients[session_index].fd, &readable_fds))
             {
-                read_client(&s, i);
+                process_client_socket(&server, (int)session_index);
             }
         }
 
         now = time(NULL);
-        if (now >= s.next_update)
+        if (now >= server.next_update)
         {
-            broadcast_global(&s);
-            s.next_update = now + s.period_sec;
+            broadcast_global_view(&server);
+            server.next_update = now + server.period_sec;
         }
-        if (now >= s.start_time + s.duration_sec)
+        if (now >= server.start_time + server.duration_sec)
         {
-            broadcast_game_over(&s);
-            s.running = 0;
+            broadcast_game_summary(&server);
+            server.running = 0;
         }
     }
 
-    for (size_t i = 0; i < s.client_count; ++i)
+    for (size_t session_index = 0; session_index < server.client_count; ++session_index)
     {
-        disconnect_client(&s, i);
+        disconnect_session(&server, (int)session_index);
     }
-    close(s.listen_fd);
-    server_free(&s);
+    close(server.listen_fd);
+    release_server_state(&server);
     return 0;
 }

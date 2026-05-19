@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Punto di ingresso del client: richiede host/porta e avvia client_run().
+// Qui tengo il main volutamente piccolo: valido gli argomenti e poi delego
+// tutta la logica reale a client_run(), cosi il flusso del programma resta
+// facile da seguire.
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "Uso: %s <host> <porta>\n", argv[0]);

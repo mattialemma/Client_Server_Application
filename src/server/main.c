@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Punto di ingresso del server: valida gli argomenti e avvia server_run().
+// Anche qui il main fa solo da "ingresso pulito": controllo gli argomenti,
+// imposto i default e poi lascio tutto il lavoro alla logica del server.
 int main(int argc, char **argv) {
     int ok;
     long duration = 300;

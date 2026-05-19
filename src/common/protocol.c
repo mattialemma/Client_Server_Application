@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-// Valida nickname/password: non vuoti, lunghezza massima e caratteri ammessi.
+// Qui tengo una validazione volutamente semplice: basta controllare che i dati
+// siano non vuoti, abbastanza corti e composti solo da caratteri "sicuri".
 int proto_valid_name(const char *s, size_t max_len) {
     size_t i;
 
@@ -23,7 +24,8 @@ int proto_valid_name(const char *s, size_t max_len) {
     return 1;
 }
 
-// Converte testo o tasto rapido in una direzione del gioco.
+// Questo helper mi permette di accettare sia il testo usato nel protocollo sia
+// le scorciatoie da tastiera del client, ma di lavorare internamente sempre con un enum.
 int proto_parse_direction(const char *s, direction_t *dir) {
     // Accetta le forme usate dal protocollo e i tasti rapidi del client.
     if (s == NULL || dir == NULL) {
@@ -59,7 +61,8 @@ const char *proto_direction_name(direction_t dir) {
     }
 }
 
-// Divide una riga in token separati da spazi, modificando il buffer originale.
+// Tokenizzo la riga "in place": invece di allocare nuove stringhe, sostituisco
+// gli spazi con '\0' e salvo i puntatori all'interno dello stesso buffer.
 int proto_split(char *line, char **tokens, int max_tokens) {
     int count = 0;
     char *p = line;
@@ -82,7 +85,8 @@ int proto_split(char *line, char **tokens, int max_tokens) {
     return count;
 }
 
-// Costruisce una riga di protocollo e aggiunge sempre il newline finale.
+// Tutti i messaggi applicativi devono terminare con newline; centralizzo qui
+// questa regola per evitare dimenticanze nei vari punti del programma.
 int proto_make_line(char *dst, size_t dst_size, const char *fmt, ...) {
     va_list ap;
     int n;

@@ -17,381 +17,434 @@
 #include <unistd.h>
 
 typedef struct {
-    ui_state_t ui; 
-    char input[UI_INPUT_MAX];
-    size_t input_len;
-    int interactive;
-} client_ctx_t;
+    // In questa struttura raccolgo tutto lo stato runtime del client, cosi
+    // le funzioni non devono inseguire troppe variabili sparse.
+    ui_state_t ui;
+    char command_buffer[UI_INPUT_MAX];
+    size_t command_length;
+    int interactive_mode;
+} client_runtime_t;
 
-static struct termios saved_termios;
-static int termios_saved = 0;
+static struct termios g_saved_termios;
+static int g_terminal_mode_saved = 0;
 
-static void restore_terminal(void) {
+/* Gestione terminale */
+
+static void restore_terminal_mode(void) {
     // Ripristina il terminale se il client lo aveva messo in modalita non canonica.
-    if (termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
-        termios_saved = 0;
+    if (g_terminal_mode_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_termios);
+        g_terminal_mode_saved = 0;
     }
 }
 
-static void enable_terminal_mode(void) {
-    struct termios raw;
+static void activate_terminal_mode(void) {
+    struct termios raw_mode;
 
     // In modalita interattiva leggiamo un byte alla volta, cosi w/a/s/d sono immediati.
     if (!isatty(STDIN_FILENO)) {
         return;
     }
-    if (tcgetattr(STDIN_FILENO, &saved_termios) != 0) {
+    if (tcgetattr(STDIN_FILENO, &g_saved_termios) != 0) {
         return;
     }
-    raw = saved_termios;
-    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 0;
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
-        termios_saved = 1;
+    raw_mode = g_saved_termios;
+    raw_mode.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw_mode.c_cc[VMIN] = 0;
+    raw_mode.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw_mode) == 0) {
+        g_terminal_mode_saved = 1;
     }
 }
 
-static int send_command(int fd, const char *fmt, ...) {
-    // Tutti i comandi applicativi sono righe terminate da '\n'.
+/* Invio comandi */
+
+static int send_protocol_command(int socket_fd, const char *fmt, ...) {
+    // Il protocollo applicativo e testuale e lavora "a righe": qui formatto il
+    // comando una sola volta e mi assicuro che esca sempre gia pronto per la rete.
     char payload[PROTO_MAX_LINE];
-    char line[PROTO_MAX_LINE];
-    va_list ap;
-    int n;
+    char framed_line[PROTO_MAX_LINE];
+    va_list args;
+    int written;
 
-    va_start(ap, fmt);
-    n = vsnprintf(payload, sizeof(payload), fmt, ap);
-    va_end(ap);
-    if (n < 0 || (size_t)n >= sizeof(payload)) {
+    va_start(args, fmt);
+    written = vsnprintf(payload, sizeof(payload), fmt, args);
+    va_end(args);
+    if (written < 0 || (size_t)written >= sizeof(payload)) {
         return -1;
     }
-    if (proto_make_line(line, sizeof(line), "%s", payload) < 0) {
+    if (proto_make_line(framed_line, sizeof(framed_line), "%s", payload) < 0) {
         return -1;
     }
-    return net_send_line(fd, line);
+    return net_send_line(socket_fd, framed_line);
 }
 
-static void trim_newline(char *s) {
-    size_t n = strlen(s);
-    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r')) {
-        s[--n] = '\0';
-    }
-}
+/* Parsing input */
 
-static int parse_two_numbers(char **tok, long *a, long *b) {
-    int ok_a;
-    int ok_b;
+static void strip_line_endings(char *text) {
+    size_t length = strlen(text);
 
-    *a = utils_parse_long(tok[1], 1, 200, &ok_a);
-    *b = utils_parse_long(tok[2], 1, 200, &ok_b);
-    return ok_a && ok_b;
-}
-
-static void handle_server_line(client_ctx_t *ctx, const char *line) {
-    // Traduce una riga del protocollo nello stato grafico mantenuto dalla UI.
-    char copy[PROTO_MAX_LINE];
-    char *tok[PROTO_MAX_TOKENS];
-    int ntok;
-    long w;
-    long h;
-    long x;
-    long y;
-
-    snprintf(copy, sizeof(copy), "%s", line);
-    ntok = proto_split(copy, tok, PROTO_MAX_TOKENS);
-    if (ntok == 0) {
-        return;
-    }
-
-    if (strcmp(tok[0], "S2C_LOCAL_MAP") == 0 && ntok == 4) {
-        if (parse_two_numbers(tok, &w, &h)) {
-            ui_set_local_map(&ctx->ui, (int)w, (int)h, tok[3]);
-            ui_add_event(&ctx->ui, "Mappa locale aggiornata");
-        }
-    } else if (strcmp(tok[0], "S2C_GLOBAL_UPDATE") == 0 && ntok == 5) {
-        if (parse_two_numbers(tok, &w, &h)) {
-            ui_set_global_map(&ctx->ui, (int)w, (int)h, tok[3], tok[4]);
-            ui_add_event(&ctx->ui, "Aggiornamento globale ricevuto");
-        }
-    } else if (strcmp(tok[0], "S2C_USERS") == 0 && ntok == 2) {
-        ui_set_positions(&ctx->ui, tok[1]);
-        ui_add_event(&ctx->ui, "Utenti collegati: %s", tok[1]);
-    } else if (strcmp(tok[0], "S2C_GAME_OVER") == 0 && ntok == 4) {
-        ui_set_game_over(&ctx->ui, tok[1], tok[2], tok[3]);
-        ui_add_event(&ctx->ui, "Partita terminata");
-    } else if (strcmp(tok[0], "S2C_OK") == 0 && ntok >= 2) {
-        if (strcmp(tok[1], "CONNECTED") == 0) {
-            ui_set_connected(&ctx->ui, 1);
-            ui_add_event(&ctx->ui, "Connessione stabilita");
-        } else if (strcmp(tok[1], "REGISTERED") == 0) {
-            ui_add_event(&ctx->ui, "Registrazione completata");
-        } else if (strcmp(tok[1], "LOGGED_IN") == 0 && ntok == 6) {
-            int ok_x;
-            int ok_y;
-            x = utils_parse_long(tok[4], 0, 10000, &ok_x);
-            y = utils_parse_long(tok[5], 0, 10000, &ok_y);
-            ui_set_user(&ctx->ui, tok[2], tok[3]);
-            if (ok_x && ok_y) {
-                ui_set_position(&ctx->ui, (int)x, (int)y);
-            }
-            ui_add_event(&ctx->ui, "Login effettuato");
-        } else if (strcmp(tok[1], "MOVED") == 0 && ntok == 4) {
-            int ok_x;
-            int ok_y;
-            x = utils_parse_long(tok[2], 0, 10000, &ok_x);
-            y = utils_parse_long(tok[3], 0, 10000, &ok_y);
-            if (ok_x && ok_y) {
-                ui_set_position(&ctx->ui, (int)x, (int)y);
-                ui_add_event(&ctx->ui, "Movimento eseguito: posizione (%ld,%ld)", x, y);
-            }
-        } else if (strcmp(tok[1], "BYE") == 0) {
-            ui_add_event(&ctx->ui, "Disconnessione confermata dal server");
-        } else {
-            ui_add_event(&ctx->ui, "OK dal server");
-        }
-    } else if (strcmp(tok[0], "S2C_ERR") == 0 && ntok >= 2) {
-        ui_add_event(&ctx->ui, "Errore server: %s", tok[1]);
-    } else {
-        ui_add_event(&ctx->ui, "Messaggio server non riconosciuto");
+    while (length > 0 && (text[length - 1] == '\n' || text[length - 1] == '\r')) {
+        text[--length] = '\0';
     }
 }
 
-static int process_socket(int fd, client_ctx_t *ctx, char *buf, size_t *len) {
-    // TCP e uno stream: accumuliamo byte finche non troviamo righe complete.
-    char tmp[512];
-    ssize_t n = recv(fd, tmp, sizeof(tmp), 0);
+static int parse_map_dimensions(char **tokens, long *width, long *height) {
+    int width_ok;
+    int height_ok;
 
-    if (n < 0 && errno == EINTR) {
-        return 0;
-    }
-    if (n <= 0) {
-        ui_set_connected(&ctx->ui, 0);
-        ui_add_event(&ctx->ui, "Connessione chiusa dal server");
-        return -1;
-    }
-    if (*len + (size_t)n >= PROTO_MAX_LINE) {
-        ui_add_event(&ctx->ui, "Messaggio server troppo lungo");
-        return -1;
-    }
-    memcpy(buf + *len, tmp, (size_t)n);
-    *len += (size_t)n;
-    buf[*len] = '\0';
-
-    while (1) {
-        char *nl = memchr(buf, '\n', *len);
-        char line[PROTO_MAX_LINE];
-        size_t line_len;
-        if (nl == NULL) {
-            break;
-        }
-        line_len = (size_t)(nl - buf);
-        memcpy(line, buf, line_len);
-        line[line_len] = '\0';
-        memmove(buf, nl + 1, *len - line_len - 1);
-        *len -= line_len + 1;
-        buf[*len] = '\0';
-        handle_server_line(ctx, line);
-    }
-    return 0;
+    *width = utils_parse_long(tokens[1], 1, 200, &width_ok);
+    *height = utils_parse_long(tokens[2], 1, 200, &height_ok);
+    return width_ok && height_ok;
 }
 
-static int execute_command(int fd, client_ctx_t *ctx, char *line) {
-    // Converte i comandi del client nei messaggi C2S del protocollo.
-    char copy[PROTO_MAX_LINE];
-    char *tok[PROTO_MAX_TOKENS];
-    int ntok;
-    direction_t dir;
+static int log_and_send_command(client_runtime_t *runtime, int socket_fd,
+                                const char *event_message, const char *protocol_message) {
+    // Questo helper mi evita di ripetere sempre la stessa coppia di operazioni:
+    // aggiorno il registro eventi della UI e subito dopo invio il comando vero.
+    ui_add_event(&runtime->ui, "%s", event_message);
+    return send_protocol_command(socket_fd, "%s", protocol_message);
+}
 
-    trim_newline(line);
-    snprintf(copy, sizeof(copy), "%s", line);
-    ntok = proto_split(copy, tok, PROTO_MAX_TOKENS);
-    if (ntok == 0) {
+static int run_user_command(int socket_fd, client_runtime_t *runtime, char *raw_command) {
+    // Qui faccio da "ponte" tra i comandi digitati dall'utente e i messaggi
+    // C2S del protocollo. L'idea e semplice: riconosco il comando locale e lo
+    // traduco nel testo che il server si aspetta.
+    char command_copy[PROTO_MAX_LINE];
+    char *tokens[PROTO_MAX_TOKENS];
+    int token_count;
+    direction_t direction;
+
+    strip_line_endings(raw_command);
+    snprintf(command_copy, sizeof(command_copy), "%s", raw_command);
+    token_count = proto_split(command_copy, tokens, PROTO_MAX_TOKENS);
+    if (token_count == 0) {
         return 0;
     }
 
-    if (strcmp(tok[0], "register") == 0 && ntok == 3) {
-        ui_add_event(&ctx->ui, "Invio registrazione per %s", tok[1]);
-        return send_command(fd, "C2S_REGISTER %s %s", tok[1], tok[2]);
+    if (strcmp(tokens[0], "register") == 0 && token_count == 3) {
+        char event_message[PROTO_MAX_LINE];
+        char protocol_message[PROTO_MAX_LINE];
+
+        snprintf(event_message, sizeof(event_message), "Registro il profilo %s", tokens[1]);
+        snprintf(protocol_message, sizeof(protocol_message), "C2S_REGISTER %s %s", tokens[1], tokens[2]);
+        return log_and_send_command(runtime, socket_fd, event_message, protocol_message);
     }
-    if (strcmp(tok[0], "login") == 0 && ntok == 3) {
-        ui_add_event(&ctx->ui, "Invio login per %s", tok[1]);
-        return send_command(fd, "C2S_LOGIN %s %s", tok[1], tok[2]);
+    if (strcmp(tokens[0], "login") == 0 && token_count == 3) {
+        char event_message[PROTO_MAX_LINE];
+        char protocol_message[PROTO_MAX_LINE];
+
+        snprintf(event_message, sizeof(event_message), "Richiedo accesso per %s", tokens[1]);
+        snprintf(protocol_message, sizeof(protocol_message), "C2S_LOGIN %s %s", tokens[1], tokens[2]);
+        return log_and_send_command(runtime, socket_fd, event_message, protocol_message);
     }
-    if (strcmp(tok[0], "move") == 0 && ntok == 2 && proto_parse_direction(tok[1], &dir) == 0) {
-        return send_command(fd, "C2S_MOVE %s", proto_direction_name(dir));
+    if (strcmp(tokens[0], "move") == 0 && token_count == 2 &&
+        proto_parse_direction(tokens[1], &direction) == 0) {
+        return send_protocol_command(socket_fd, "C2S_MOVE %s", proto_direction_name(direction));
     }
-    if (ntok == 1 && proto_parse_direction(tok[0], &dir) == 0) {
-        return send_command(fd, "C2S_MOVE %s", proto_direction_name(dir));
+    if (token_count == 1 && proto_parse_direction(tokens[0], &direction) == 0) {
+        return send_protocol_command(socket_fd, "C2S_MOVE %s", proto_direction_name(direction));
     }
-    if ((strcmp(tok[0], "users") == 0 || strcmp(tok[0], "list") == 0 || strcmp(tok[0], "l") == 0) && ntok == 1) {
-        ui_add_event(&ctx->ui, "Richiesta lista utenti");
-        return send_command(fd, "C2S_LIST_USERS");
+    if ((strcmp(tokens[0], "users") == 0 || strcmp(tokens[0], "list") == 0 || strcmp(tokens[0], "l") == 0) &&
+        token_count == 1) {
+        return log_and_send_command(runtime, socket_fd,
+                                    "Richiedo esploratori attivi",
+                                    "C2S_LIST_USERS");
     }
-    if (strcmp(tok[0], "local") == 0 && ntok == 1) {
-        ui_add_event(&ctx->ui, "Richiesta mappa locale");
-        return send_command(fd, "C2S_LOCAL_MAP");
+    if (strcmp(tokens[0], "local") == 0 && token_count == 1) {
+        return log_and_send_command(runtime, socket_fd,
+                                    "Richiedo vista locale",
+                                    "C2S_LOCAL_MAP");
     }
-    if (strcmp(tok[0], "global") == 0 && ntok == 1) {
-        ui_add_event(&ctx->ui, "Richiesta mappa globale");
-        return send_command(fd, "C2S_GLOBAL_MAP");
+    if (strcmp(tokens[0], "global") == 0 && token_count == 1) {
+        return log_and_send_command(runtime, socket_fd,
+                                    "Richiedo mappa del labirinto",
+                                    "C2S_GLOBAL_MAP");
     }
-    if ((strcmp(tok[0], "help") == 0 || strcmp(tok[0], "h") == 0) && ntok == 1) {
-        ui_add_event(&ctx->ui, "Guida rapida visibile nel pannello comandi");
+    if ((strcmp(tokens[0], "help") == 0 || strcmp(tokens[0], "h") == 0) && token_count == 1) {
+        ui_add_event(&runtime->ui, "Guida visibile nel pannello comandi");
         return 0;
     }
-    if ((strcmp(tok[0], "quit") == 0 || strcmp(tok[0], "q") == 0) && ntok == 1) {
-        ui_add_event(&ctx->ui, "Uscita richiesta");
-        if (send_command(fd, "C2S_QUIT") != 0) {
+    if ((strcmp(tokens[0], "quit") == 0 || strcmp(tokens[0], "q") == 0) && token_count == 1) {
+        ui_add_event(&runtime->ui, "Richiesta di uscita");
+        if (send_protocol_command(socket_fd, "C2S_QUIT") != 0) {
             return -1;
         }
         return 1;
     }
 
-    ui_add_event(&ctx->ui, "Comando non riconosciuto: %s", tok[0]);
+    ui_add_event(&runtime->ui, "Comando ignoto: %s", tokens[0]);
     return 0;
 }
 
-static int handle_input_byte(int fd, client_ctx_t *ctx, unsigned char ch) {
-    char command[UI_INPUT_MAX];
-    direction_t dir;
+static int handle_typed_byte(int socket_fd, client_runtime_t *runtime, unsigned char byte_read) {
+    char single_command[UI_INPUT_MAX];
+    direction_t direction;
 
-    // Ctrl+D e EOF vengono trattati come uscita pulita.
-    if (ch == 4) {
-        send_command(fd, "C2S_QUIT");
+    // Gestisco l'input un byte alla volta per permettere sia i tasti rapidi
+    // sia la modalita "comando completo" confermata con Invio.
+    if (byte_read == 4) {
+        send_protocol_command(socket_fd, "C2S_QUIT");
         return 1;
     }
-    if (ctx->input_len == 0 && (ch == 'w' || ch == 'a' || ch == 's' || ch == 'd')) {
-        command[0] = (char)ch;
-        command[1] = '\0';
-        if (proto_parse_direction(command, &dir) == 0) {
-            return send_command(fd, "C2S_MOVE %s", proto_direction_name(dir));
+    if (runtime->command_length == 0 &&
+        (byte_read == 'w' || byte_read == 'a' || byte_read == 's' || byte_read == 'd')) {
+        single_command[0] = (char)byte_read;
+        single_command[1] = '\0';
+        if (proto_parse_direction(single_command, &direction) == 0) {
+            return send_protocol_command(socket_fd, "C2S_MOVE %s", proto_direction_name(direction));
         }
     }
-    if (ch == '\r' || ch == '\n') {
-        snprintf(command, sizeof(command), "%s", ctx->input);
-        ctx->input[0] = '\0';
-        ctx->input_len = 0;
-        return execute_command(fd, ctx, command);
+    if (byte_read == '\r' || byte_read == '\n') {
+        snprintf(single_command, sizeof(single_command), "%s", runtime->command_buffer);
+        runtime->command_buffer[0] = '\0';
+        runtime->command_length = 0;
+        return run_user_command(socket_fd, runtime, single_command);
     }
-    if (ch == 127 || ch == 8) {
-        if (ctx->input_len > 0) {
-            ctx->input[--ctx->input_len] = '\0';
-            if (ctx->interactive) {
+    if (byte_read == 127 || byte_read == 8) {
+        if (runtime->command_length > 0) {
+            runtime->command_buffer[--runtime->command_length] = '\0';
+            if (runtime->interactive_mode) {
                 fputs("\b \b", stdout);
                 fflush(stdout);
             }
         }
         return 0;
     }
-    if (isprint(ch) && ctx->input_len + 1 < sizeof(ctx->input)) {
-        ctx->input[ctx->input_len++] = (char)ch;
-        ctx->input[ctx->input_len] = '\0';
-        if (ctx->interactive) {
-            putchar(ch);
+    if (isprint(byte_read) && runtime->command_length + 1 < sizeof(runtime->command_buffer)) {
+        runtime->command_buffer[runtime->command_length++] = (char)byte_read;
+        runtime->command_buffer[runtime->command_length] = '\0';
+        if (runtime->interactive_mode) {
+            putchar(byte_read);
             fflush(stdout);
         }
     }
     return 0;
 }
 
-static int process_stdin(int fd, client_ctx_t *ctx, int *command_done) {
-    // Gestisce sia terminale interattivo sia input da pipe/file.
-    unsigned char tmp[128];
-    ssize_t n;
-    ssize_t i;
-    int rc = 0;
+static int consume_stdin(int socket_fd, client_runtime_t *runtime, int *completed_command) {
+    // Questo punto unifica due casi diversi: tastiera interattiva e input
+    // arrivato da pipe/file. In entrambi i casi scorro i byte e li passo
+    // allo stesso gestore, cosi il comportamento resta coerente.
+    unsigned char input_chunk[128];
+    ssize_t bytes_read;
+    ssize_t index;
+    int result = 0;
 
-    *command_done = 0;
-    n = read(STDIN_FILENO, tmp, sizeof(tmp));
-    if (n == 0) {
-        send_command(fd, "C2S_QUIT");
+    *completed_command = 0;
+    bytes_read = read(STDIN_FILENO, input_chunk, sizeof(input_chunk));
+    if (bytes_read == 0) {
+        send_protocol_command(socket_fd, "C2S_QUIT");
         return 1;
     }
-    if (n < 0) {
+    if (bytes_read < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
             return 0;
         }
         return -1;
     }
-    for (i = 0; i < n; ++i) {
-        rc = handle_input_byte(fd, ctx, tmp[i]);
-        if (tmp[i] == '\r' || tmp[i] == '\n') {
-            *command_done = 1;
+    for (index = 0; index < bytes_read; ++index) {
+        result = handle_typed_byte(socket_fd, runtime, input_chunk[index]);
+        if (input_chunk[index] == '\r' || input_chunk[index] == '\n') {
+            *completed_command = 1;
         }
-        if (rc != 0) {
-            return rc;
+        if (result != 0) {
+            return result;
         }
     }
     return 0;
 }
 
-int client_run(const char *host, const char *port) {
-    int fd = net_connect_tcp(host, port);
-    char sock_buf[PROTO_MAX_LINE];
-    size_t sock_len = 0;
-    int running = 1;
-    int exit_status = 0;
-    client_ctx_t ctx;
+/* Parsing messaggi server */
 
-    if (fd < 0) {
+static void apply_server_message(client_runtime_t *runtime, const char *server_line) {
+    // Qui faccio l'operazione opposta a run_user_command(): prendo una riga
+    // S2C dal server e aggiorno lo stato locale della UI in base al contenuto.
+    char line_copy[PROTO_MAX_LINE];
+    char *tokens[PROTO_MAX_TOKENS];
+    int token_count;
+    long width;
+    long height;
+    long x;
+    long y;
+
+    snprintf(line_copy, sizeof(line_copy), "%s", server_line);
+    token_count = proto_split(line_copy, tokens, PROTO_MAX_TOKENS);
+    if (token_count == 0) {
+        return;
+    }
+
+    if (strcmp(tokens[0], "S2C_LOCAL_MAP") == 0 && token_count == 4) {
+        if (parse_map_dimensions(tokens, &width, &height)) {
+            ui_set_local_map(&runtime->ui, (int)width, (int)height, tokens[3]);
+            ui_add_event(&runtime->ui, "Vista locale sincronizzata");
+        }
+    } else if (strcmp(tokens[0], "S2C_GLOBAL_UPDATE") == 0 && token_count == 5) {
+        if (parse_map_dimensions(tokens, &width, &height)) {
+            ui_set_global_map(&runtime->ui, (int)width, (int)height, tokens[3], tokens[4]);
+            ui_add_event(&runtime->ui, "Impulso globale ricevuto");
+        }
+    } else if (strcmp(tokens[0], "S2C_USERS") == 0 && token_count == 2) {
+        ui_set_positions(&runtime->ui, tokens[1]);
+        ui_add_event(&runtime->ui, "Esploratori attivi: %s", tokens[1]);
+    } else if (strcmp(tokens[0], "S2C_GAME_OVER") == 0 && token_count == 4) {
+        ui_set_game_over(&runtime->ui, tokens[1], tokens[2], tokens[3]);
+        ui_add_event(&runtime->ui, "Sessione del labirinto conclusa");
+    } else if (strcmp(tokens[0], "S2C_OK") == 0 && token_count >= 2) {
+        if (strcmp(tokens[1], "CONNECTED") == 0) {
+            ui_set_connected(&runtime->ui, 1);
+            ui_add_event(&runtime->ui, "Canale con il server aperto");
+        } else if (strcmp(tokens[1], "REGISTERED") == 0) {
+            ui_add_event(&runtime->ui, "Profilo esploratore registrato");
+        } else if (strcmp(tokens[1], "LOGGED_IN") == 0 && token_count == 6) {
+            int x_ok;
+            int y_ok;
+
+            x = utils_parse_long(tokens[4], 0, 10000, &x_ok);
+            y = utils_parse_long(tokens[5], 0, 10000, &y_ok);
+            ui_set_user(&runtime->ui, tokens[2], tokens[3]);
+            if (x_ok && y_ok) {
+                ui_set_position(&runtime->ui, (int)x, (int)y);
+            }
+            ui_add_event(&runtime->ui, "Ingresso nel labirinto confermato");
+        } else if (strcmp(tokens[1], "MOVED") == 0 && token_count == 4) {
+            int x_ok;
+            int y_ok;
+
+            x = utils_parse_long(tokens[2], 0, 10000, &x_ok);
+            y = utils_parse_long(tokens[3], 0, 10000, &y_ok);
+            if (x_ok && y_ok) {
+                ui_set_position(&runtime->ui, (int)x, (int)y);
+                ui_add_event(&runtime->ui, "Passo eseguito verso (%ld,%ld)", x, y);
+            }
+        } else if (strcmp(tokens[1], "BYE") == 0) {
+            ui_add_event(&runtime->ui, "Uscita dal labirinto confermata");
+        } else {
+            ui_add_event(&runtime->ui, "Segnale OK dal server");
+        }
+    } else if (strcmp(tokens[0], "S2C_ERR") == 0 && token_count >= 2) {
+        ui_add_event(&runtime->ui, "Avviso: %s", tokens[1]);
+    } else {
+        ui_add_event(&runtime->ui, "Segnale server non riconosciuto");
+    }
+}
+
+static int consume_server_socket(int socket_fd, client_runtime_t *runtime,
+                                 char *receive_buffer, size_t *receive_length) {
+    // TCP non conserva i confini dei messaggi, quindi qui tengo un buffer di
+    // accumulo e considero "completa" una risposta solo quando trovo '\n'.
+    char incoming_chunk[512];
+    ssize_t bytes_read = recv(socket_fd, incoming_chunk, sizeof(incoming_chunk), 0);
+
+    if (bytes_read < 0 && errno == EINTR) {
+        return 0;
+    }
+    if (bytes_read <= 0) {
+        ui_set_connected(&runtime->ui, 0);
+        ui_add_event(&runtime->ui, "Canale chiuso dal server");
+        return -1;
+    }
+    if (*receive_length + (size_t)bytes_read >= PROTO_MAX_LINE) {
+        ui_add_event(&runtime->ui, "Segnale server troppo lungo");
+        return -1;
+    }
+    memcpy(receive_buffer + *receive_length, incoming_chunk, (size_t)bytes_read);
+    *receive_length += (size_t)bytes_read;
+    receive_buffer[*receive_length] = '\0';
+
+    while (1) {
+        char *line_break = memchr(receive_buffer, '\n', *receive_length);
+        char complete_line[PROTO_MAX_LINE];
+        size_t line_length;
+
+        if (line_break == NULL) {
+            break;
+        }
+        line_length = (size_t)(line_break - receive_buffer);
+        memcpy(complete_line, receive_buffer, line_length);
+        complete_line[line_length] = '\0';
+        memmove(receive_buffer, line_break + 1, *receive_length - line_length - 1);
+        *receive_length -= line_length + 1;
+        receive_buffer[*receive_length] = '\0';
+        apply_server_message(runtime, complete_line);
+    }
+    return 0;
+}
+
+/* Loop principale */
+
+int client_run(const char *host, const char *port) {
+    int server_fd = net_connect_tcp(host, port);
+    char socket_buffer[PROTO_MAX_LINE];
+    size_t socket_buffer_length = 0;
+    int keep_running = 1;
+    int exit_code = 0;
+    client_runtime_t runtime;
+
+    if (server_fd < 0) {
         return -1;
     }
 
+    // Ignoro SIGPIPE per evitare che il processo termini brutalmente se provo
+    // a scrivere su una connessione che il server ha gia chiuso.
     signal(SIGPIPE, SIG_IGN);
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-    ui_init(&ctx.ui, host, port);
-    ui_set_connected(&ctx.ui, 1);
-    ui_add_event(&ctx.ui, "Connesso a %s:%s", host, port);
+    memset(&runtime, 0, sizeof(runtime));
+    runtime.interactive_mode = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+    ui_init(&runtime.ui, host, port);
+    ui_set_connected(&runtime.ui, 1);
+    ui_add_event(&runtime.ui, "Connesso a %s:%s", host, port);
 
-    enable_terminal_mode();
-    ui_render(&ctx.ui, ctx.input);
+    activate_terminal_mode();
+    ui_render(&runtime.ui, runtime.command_buffer);
 
-    while (running) {
-        fd_set rfds;
-        int maxfd = fd > STDIN_FILENO ? fd : STDIN_FILENO;
-        int rc;
+    // Questo e il cuore del client: con select aspetto insieme sia la rete sia
+    // la tastiera, cosi posso ricevere aggiornamenti mentre l'utente digita.
+    while (keep_running) {
+        fd_set readable_fds;
+        int max_fd = server_fd > STDIN_FILENO ? server_fd : STDIN_FILENO;
+        int select_result;
         int should_render = 0;
 
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-        FD_SET(STDIN_FILENO, &rfds);
-        // select permette di ricevere update dal server mentre l'utente digita.
-        rc = select(maxfd + 1, &rfds, NULL, NULL, NULL);
-        if (rc < 0) {
+        FD_ZERO(&readable_fds);
+        FD_SET(server_fd, &readable_fds);
+        FD_SET(STDIN_FILENO, &readable_fds);
+        // Qui tengo bloccato il client finche non succede qualcosa di utile:
+        // o arriva un messaggio dal server, o l'utente preme un tasto.
+        select_result = select(max_fd + 1, &readable_fds, NULL, NULL, NULL);
+        if (select_result < 0) {
             if (errno == EINTR) {
                 continue;
             }
-            exit_status = -1;
+            exit_code = -1;
             break;
         }
-        if (FD_ISSET(fd, &rfds)) {
-            if (process_socket(fd, &ctx, sock_buf, &sock_len) != 0) {
-                running = 0;
+        if (FD_ISSET(server_fd, &readable_fds)) {
+            if (consume_server_socket(server_fd, &runtime, socket_buffer, &socket_buffer_length) != 0) {
+                keep_running = 0;
             }
             should_render = 1;
         }
-        if (running && FD_ISSET(STDIN_FILENO, &rfds)) {
-            int command_done = 0;
-            rc = process_stdin(fd, &ctx, &command_done);
-            if (rc < 0) {
-                exit_status = -1;
-                running = 0;
-            } else if (rc > 0) {
-                running = 0;
+        if (keep_running && FD_ISSET(STDIN_FILENO, &readable_fds)) {
+            int command_completed = 0;
+
+            select_result = consume_stdin(server_fd, &runtime, &command_completed);
+            if (select_result < 0) {
+                exit_code = -1;
+                keep_running = 0;
+            } else if (select_result > 0) {
+                keep_running = 0;
             }
-            should_render = command_done;
+            should_render = command_completed;
         }
 
         if (should_render) {
-            ui_render(&ctx.ui, ctx.input);
+            ui_render(&runtime.ui, runtime.command_buffer);
         }
     }
 
-    ui_render(&ctx.ui, ctx.input);
-    restore_terminal();
+    ui_render(&runtime.ui, runtime.command_buffer);
+    restore_terminal_mode();
     ui_finish();
-    close(fd);
-    return exit_status;
+    close(server_fd);
+    return exit_code;
 }
